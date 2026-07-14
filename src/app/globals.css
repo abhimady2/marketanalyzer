@@ -132,9 +132,51 @@ a { color: var(--gold-bright); text-decoration: none; }
 .foot .srcs { color: var(--text-dim); }
 .dot { opacity: .4; margin: 0 6px; }
 
+/* ── topbar right: live price + sparkline + LIVE badge ── */
+.topright { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.price-wrap { display: flex; align-items: center; gap: 12px; }
+.spark { display: block; }
+.spark-dot { animation: sparkpulse 1.7s ease-in-out infinite; }
+@keyframes sparkpulse { 0%, 100% { r: 2.8px; opacity: 1; } 50% { r: 3.8px; opacity: .5; } }
+
+.live-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--bull); text-transform: uppercase; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bull); animation: livepulse 1.8s ease-out infinite; }
+@keyframes livepulse { 0% { box-shadow: 0 0 0 0 rgba(0,230,118,.55); } 70% { box-shadow: 0 0 0 7px rgba(0,230,118,0); } 100% { box-shadow: 0 0 0 0 rgba(0,230,118,0); } }
+
+/* ── confidence gauge ── */
+.hero .conf { display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 132px; }
+.gauge { display: block; }
+.gauge-arc, .gauge-needle { transition: all .6s cubic-bezier(.4,0,.2,1); }
+.conf-num { font-size: 30px; font-weight: 800; line-height: 1; margin-top: -10px; }
+.hero .conf .lbl { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted); margin-top: 5px; }
+
+/* ── bias marker glides to its new spot on each update (live pointer) ── */
+.meter .marker { transition: left .6s cubic-bezier(.4,0,.2,1), background .4s; box-shadow: 0 0 10px 1px rgba(255,255,255,.28); }
+
+/* ── bucket score bar ── */
+.bucket .b-right { display: inline-flex; align-items: center; gap: 10px; }
+.b-bar { width: 70px; height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.b-bar > i { display: block; height: 100%; border-radius: 999px; transition: width .7s cubic-bezier(.4,0,.2,1), background .4s; }
+.adx .bar > i { transition: width .7s cubic-bezier(.4,0,.2,1); }
+
+/* ── news impact badges ── */
+.impact-badge { font-size: 9.5px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; padding: 4px 8px; border-radius: 6px; white-space: nowrap; align-self: center; border: 1px solid transparent; }
+.imp-High { color: var(--bear); background: rgba(255,92,92,.12); border-color: rgba(255,92,92,.35); }
+.imp-Medium { color: var(--neutral); background: rgba(255,183,77,.12); border-color: rgba(255,183,77,.35); }
+.imp-Low { color: var(--text-muted); background: rgba(124,138,156,.12); border-color: rgba(124,138,156,.3); }
+.imp-Holiday { color: var(--text-muted); background: rgba(124,138,156,.1); border-color: rgba(124,138,156,.25); }
+
+/* ── update flash + card entrance ── */
+.hero.flash { animation: flashpulse .8s ease-out; }
+@keyframes flashpulse { 0% { border-color: var(--gold); box-shadow: 0 0 22px 0 rgba(212,175,55,.28); } 100% { border-color: var(--border); box-shadow: none; } }
+.card { animation: cardin .5s ease both; }
+@keyframes cardin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { *, .card, .live-dot, .spark-dot { animation: none !important; transition: none !important; } }
+
 @media (max-width: 760px) {
   .cols-2 { grid-template-columns: 1fr; }
   .container { padding: 16px 12px 60px; }
   .hero-row { flex-direction: column; }
-  .hero .conf { text-align: left; }
+  .hero .conf { align-items: flex-start; text-align: left; }
 }
+@media (max-width: 520px) { .spark { display: none; } }

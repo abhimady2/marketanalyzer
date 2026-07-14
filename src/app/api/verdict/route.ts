@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const STALE_MS = 15 * 60 * 1000;
+const STALE_MS = 45 * 1000; // live dashboard polls ~15s; recompute at most ~every 45s (macro inputs are cached 30m)
 const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
 

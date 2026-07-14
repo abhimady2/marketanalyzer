@@ -29,6 +29,7 @@ export type Direction = 'Bullish' | 'Bearish' | 'Neutral' | 'Unknown';
 
 export interface Verdict {
   direction: Direction;
+  grade: string;           // confidence-tiered label, e.g. "High Bearish" / "Ultra Bullish"
   bias: number;            // [-1,+1]
   confidence: number;      // 0..100
   goldMacroBias: number | null;
@@ -104,8 +105,12 @@ export function fuse(
     (goldMacroBias == null && technicalBias == null) ? 'Unknown'
       : bias > 0.15 ? 'Bullish' : bias < -0.15 ? 'Bearish' : 'Neutral';
 
+  // Confidence-tiered label: Low / Medium / High / Ultra + direction.
+  const tier = confidence >= 75 ? 'Ultra' : confidence >= 55 ? 'High' : confidence >= 35 ? 'Medium' : 'Low';
+  const grade = direction === 'Bullish' || direction === 'Bearish' ? `${tier} ${direction}` : direction;
+
   return {
-    direction, bias, confidence,
+    direction, grade, bias, confidence,
     goldMacroBias, technicalBias,
     macroRegime: macro.regime, macroTotal: macro.total, agreement,
     cautions, spot,

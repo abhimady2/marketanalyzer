@@ -14,7 +14,8 @@ export default function PriceTicker({ initial }: { initial: Spot | null }) {
         if (live && j.spot) setSpot(j.spot);
       } catch { /* keep last */ }
     };
-    const id = setInterval(tick, 20000);
+    tick();
+    const id = setInterval(tick, 10000);
     return () => { live = false; clearInterval(id); };
   }, []);
 

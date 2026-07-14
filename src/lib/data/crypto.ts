@@ -1,13 +1,14 @@
 import type { RegimeInputs } from '../engine/regime';
 
 // Free/no-key crypto liquidity + market inputs. Never throws — nulls on failure.
-async function get(url: string, kind: 'json' | 'text' = 'json'): Promise<any> {
+// iad1-safe sources only: CoinGecko + Yahoo Finance chart (NO Binance/Stooq).
+async function get(url: string, headers: Record<string, string> = {}): Promise<any> {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), 8000);
   try {
-    const r = await fetch(url, { signal: ac.signal, headers: { accept: '*/*' } });
+    const r = await fetch(url, { signal: ac.signal, headers: { accept: 'application/json', ...headers } });
     if (!r.ok) return null;
-    return kind === 'json' ? await r.json() : await r.text();
+    return await r.json();
   } catch {
     return null;
   } finally {
@@ -15,87 +16,77 @@ async function get(url: string, kind: 'json' | 'text' = 'json'): Promise<any> {
   }
 }
 
+const lastNum = (a: any): number | null => (Array.isArray(a) && a.length ? a[a.length - 1] : null);
+
 export async function fetchCrypto(): Promise<Partial<RegimeInputs>> {
   const out: Partial<RegimeInputs> = {};
   const CG = 'https://api.coingecko.com/api/v3';
+  const YF_HDR = { 'user-agent': 'Mozilla/5.0' };
 
-  // Stablecoin mcap history (tether + usdc), daily, $B, oldest→newest.
-  try {
-    const [t, u] = await Promise.all([
-      get(`${CG}/coins/tether/market_chart?vs_currency=usd&days=120&interval=daily`),
-      get(`${CG}/coins/usd-coin/market_chart?vs_currency=usd&days=120&interval=daily`),
-    ]);
-    const tc: [number, number][] = t?.market_caps ?? [];
-    const uc: [number, number][] = u?.market_caps ?? [];
-    if (tc.length) {
-      const n = uc.length ? Math.min(tc.length, uc.length) : tc.length;
-      const daily: number[] = [];
-      for (let i = 0; i < n; i++) {
-        const sum = tc[tc.length - n + i][1] + (uc.length ? uc[uc.length - n + i][1] : 0);
-        daily.push(sum / 1e9);
-      }
-      out.stablesDaily = daily;
-      out.stablesNow = daily[daily.length - 1];
-      out.stablesPrevM = daily[Math.max(0, daily.length - 1 - 21)];
-    }
-  } catch {}
+  // 5 CoinGecko calls + 1 Yahoo, all in parallel to minimise wall time.
+  const [tether, usdc, eth, btc, global, markets, coin] = await Promise.all([
+    get(`${CG}/coins/tether/market_chart?vs_currency=usd&days=120&interval=daily`),
+    get(`${CG}/coins/usd-coin/market_chart?vs_currency=usd&days=120&interval=daily`),
+    get(`${CG}/coins/ethereum/market_chart?vs_currency=usd&days=8&interval=daily`),
+    get(`${CG}/coins/bitcoin/market_chart?vs_currency=usd&days=8&interval=daily`),
+    get(`${CG}/global`),
+    get(`${CG}/coins/markets?vs_currency=usd&ids=bitcoin,ethereum`),
+    get('https://query1.finance.yahoo.com/v8/finance/chart/COIN?interval=1d&range=5d', YF_HDR),
+  ]);
 
-  // Global: stablecoin dominance.
-  try {
-    const g = await get(`${CG}/global`);
-    const pct = g?.data?.market_cap_percentage;
-    if (pct) {
-      const dom = ['usdt', 'usdc', 'dai', 'busd', 'tusd', 'usde', 'fdusd'].reduce(
-        (s, k) => s + (typeof pct[k] === 'number' ? pct[k] : 0), 0);
-      if (dom > 0) out.stableDomNow = dom;
+  // Stablecoin mcap (tether + usdc), daily, $B, oldest→newest.
+  const tc: [number, number][] = tether?.market_caps ?? [];
+  const uc: [number, number][] = usdc?.market_caps ?? [];
+  if (tc.length) {
+    const n = uc.length ? Math.min(tc.length, uc.length) : tc.length;
+    const daily: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const sum = tc[tc.length - n + i][1] + (uc.length ? uc[uc.length - n + i][1] : 0);
+      daily.push(sum / 1e9);
     }
-    out.stableDom7dAgo = null; // no free history
+    out.stablesDaily = daily;
+    out.stablesNow = daily[daily.length - 1];
+    out.stablesPrevM = daily[Math.max(0, daily.length - 1 - 21)];
+  }
 
-    // total3 = total mcap - btc - eth mcap.
-    const totalUsd = g?.data?.total_market_cap?.usd;
-    if (typeof totalUsd === 'number') {
-      const mk = await get(`${CG}/coins/markets?vs_currency=usd&ids=bitcoin,ethereum`);
-      if (Array.isArray(mk)) {
-        const btc = mk.find((c: any) => c.id === 'bitcoin')?.market_cap;
-        const eth = mk.find((c: any) => c.id === 'ethereum')?.market_cap;
-        if (typeof btc === 'number' && typeof eth === 'number') {
-          out.total3Now = totalUsd - btc - eth;
-        }
-      }
-    }
-  } catch {}
-  out.total3_7dAgo = null;
+  // ETH/BTC ratio + BTC price, from prices[][1] (usd).
+  const ep: [number, number][] = eth?.prices ?? [];
+  const bp: [number, number][] = btc?.prices ?? [];
+  if (ep.length && bp.length) {
+    const eNow = ep[ep.length - 1][1], bNow = bp[bp.length - 1][1];
+    if (bNow) out.ethbtcNow = eNow / bNow;
+    const i7 = Math.max(0, Math.min(ep.length, bp.length) - 1 - 7);
+    const e7 = ep[i7]?.[1], b7 = bp[i7]?.[1];
+    if (e7 != null && b7) out.ethbtc7dAgo = e7 / b7;
+  }
+  if (bp.length >= 2) {
+    out.btcNow = bp[bp.length - 1][1];
+    out.btcPrev1d = bp[bp.length - 2][1];
+  }
 
-  // Binance klines: ETHBTC and BTCUSDT.
-  try {
-    const eb = await get('https://api.binance.com/api/v3/klines?symbol=ETHBTC&interval=1d&limit=10');
-    if (Array.isArray(eb) && eb.length >= 8) {
-      out.ethbtcNow = parseFloat(eb[eb.length - 1][4]);
-      out.ethbtc7dAgo = parseFloat(eb[eb.length - 1 - 7][4]);
-    }
-  } catch {}
-  try {
-    const bu = await get('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=3');
-    if (Array.isArray(bu) && bu.length >= 2) {
-      out.btcNow = parseFloat(bu[bu.length - 1][4]);
-      out.btcPrev1d = parseFloat(bu[bu.length - 2][4]);
-    }
-  } catch {}
+  // Stablecoin dominance % (sum of stablecoins) + total3 (alt mcap ex btc/eth).
+  const pct = global?.data?.market_cap_percentage;
+  if (pct) {
+    const dom = ['usdt', 'usdc', 'dai', 'busd', 'tusd', 'usde', 'fdusd'].reduce(
+      (s, k) => s + (typeof pct[k] === 'number' ? pct[k] : 0), 0);
+    if (dom > 0) out.stableDomNow = dom;
+  }
+  out.stableDom7dAgo = null; // no free 7d-ago dominance
 
-  // Stooq COIN stock CSV.
-  try {
-    const csv = await get('https://stooq.com/q/d/l/?s=coin.us&i=d', 'text');
-    if (typeof csv === 'string') {
-      const rows = csv.trim().split('\n').slice(1).filter(Boolean);
-      const close = (r: string) => parseFloat(r.split(',')[4]);
-      if (rows.length >= 2) {
-        const last = close(rows[rows.length - 1]);
-        const prev = close(rows[rows.length - 2]);
-        if (isFinite(last)) out.coinNow = last;
-        if (isFinite(prev)) out.coinPrev1d = prev;
-      }
-    }
-  } catch {}
+  const totalUsd = global?.data?.total_market_cap?.usd;
+  if (typeof totalUsd === 'number' && Array.isArray(markets)) {
+    const btcMc = markets.find((c: any) => c.id === 'bitcoin')?.market_cap;
+    const ethMc = markets.find((c: any) => c.id === 'ethereum')?.market_cap;
+    if (typeof btcMc === 'number' && typeof ethMc === 'number') out.total3Now = totalUsd - btcMc - ethMc;
+  }
+  out.total3_7dAgo = null; // no free history
+
+  // COIN stock — last two closes from Yahoo chart.
+  const closes: (number | null)[] = coin?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+  const valid = closes.filter((x): x is number => typeof x === 'number' && isFinite(x));
+  const cNow = lastNum(valid);
+  if (cNow != null) out.coinNow = cNow;
+  if (valid.length >= 2) out.coinPrev1d = valid[valid.length - 2];
 
   return out;
 }
