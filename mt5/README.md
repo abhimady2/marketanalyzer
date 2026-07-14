@@ -8,12 +8,12 @@ the analyzer, which then prefers this over the Binance PAXG proxy.
 1. Copy `MarketAnalyzerFeed.mq5` into your MT5 data folder:
    `File → Open Data Folder → MQL5 → Experts\`, then in **MetaEditor** press **F7** to compile.
 2. **Whitelist the URL:** `Tools → Options → Expert Advisors →` tick
-   **“Allow WebRequest for listed URL”** and add your site origin, e.g.
-   `https://your-app.vercel.app`
-3. Drag the EA onto **one** XAUUSD chart. In its inputs set:
-   - `InpServerUrl` = `https://your-app.vercel.app/api/ingest`
-   - `InpSecret` = the same value as `INGEST_SECRET` in your Vercel env vars
-   - `InpSymbol` = `XAUUSD.sc` (Vantage's gold symbol — already the default; leave blank to use whatever chart it's attached to)
+   **“Allow WebRequest for listed URL”** and add this origin:
+   `https://marketanalyzer-amber.vercel.app`
+3. Drag the EA onto **one** XAUUSD.sc chart. The inputs are **already preloaded**:
+   - `InpServerUrl` = `https://marketanalyzer-amber.vercel.app/api/ingest` (preset)
+   - `InpSecret` = `175f9d04bf47be063e9f946ded2fcff2` (matches the server `INGEST_SECRET`)
+   - `InpSymbol` = `XAUUSD.sc` (Vantage gold — preset; blank uses the attached chart)
 4. Enable **Algo Trading** (the toolbar button). Check the **Experts** tab log — you should see
    `MarketAnalyzerFeed started…` and no WebRequest errors.
 

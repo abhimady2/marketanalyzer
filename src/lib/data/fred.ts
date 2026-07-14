@@ -7,32 +7,51 @@ import { getSupabase } from '../supabase';
 // for 12h (FRED updates daily) with a stale-fallback: once a fetch succeeds, the
 // liquidity inputs stay available even if a later fetch is slow or blocked.
 
-const FRED = 'https://fred.stlouisfed.org/graph/fredgraph.csv?id=';
+const FRED_CSV = 'https://fred.stlouisfed.org/graph/fredgraph.csv?id=';
+const FRED_API = 'https://api.stlouisfed.org/fred/series/observations';
 const REQ_TIMEOUT = 20000;
 const CACHE_KEY = 'fred:latest';
 const TTL_MS = 12 * 3600 * 1000;
 
-async function fetchCsv(id: string, cosd: string): Promise<Map<string, number>> {
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), REQ_TIMEOUT);
+// The official FRED API (needs a free key) is built for server access; the keyless
+// graph CSV is browser-only and blocks datacenter IPs (Vercel). So: API when a key
+// is set, else the CSV (works from residential/local). Either way returns date→value.
+async function fetchSeries(id: string, cosd: string): Promise<Map<string, number>> {
+  const key = process.env.FRED_API_KEY || '';
   const out = new Map<string, number>();
-  try {
-    const res = await fetch(`${FRED}${id}&cosd=${cosd}`, { signal: ctl.signal });
-    if (!res.ok) return out;
-    const text = await res.text();
-    for (const line of text.split('\n').slice(1)) {
-      const [date, raw] = line.split(',');
-      if (!date || raw == null) continue;
-      const v = raw.trim();
-      if (v === '' || v === '.') continue;
-      const n = Number(v);
-      if (!Number.isNaN(n)) out.set(date.trim(), n);
-    }
-  } catch {
-    /* degrade */
-  } finally {
-    clearTimeout(timer);
+  const withTimeout = () => { const c = new AbortController(); const t = setTimeout(() => c.abort(), REQ_TIMEOUT); return { signal: c.signal, done: () => clearTimeout(t) }; };
+
+  if (key) {
+    const g = withTimeout();
+    try {
+      const url = `${FRED_API}?series_id=${id}&api_key=${key}&file_type=json&observation_start=${cosd}`;
+      const res = await fetch(url, { signal: g.signal });
+      if (res.ok) {
+        const j: any = await res.json();
+        for (const o of j?.observations || []) {
+          const n = Number(o.value);
+          if (o.date && o.value !== '.' && !Number.isNaN(n)) out.set(String(o.date), n);
+        }
+        if (out.size) return out;
+      }
+    } catch { /* fall to CSV */ } finally { g.done(); }
   }
+
+  const g = withTimeout();
+  try {
+    const res = await fetch(`${FRED_CSV}${id}&cosd=${cosd}`, { signal: g.signal });
+    if (res.ok) {
+      const text = await res.text();
+      for (const line of text.split('\n').slice(1)) {
+        const [date, raw] = line.split(',');
+        if (!date || raw == null) continue;
+        const v = raw.trim();
+        if (v === '' || v === '.') continue;
+        const n = Number(v);
+        if (!Number.isNaN(n)) out.set(date.trim(), n);
+      }
+    }
+  } catch { /* degrade */ } finally { g.done(); }
   return out;
 }
 
@@ -66,8 +85,8 @@ const at = (a: number[], back: number): number | null => {
 async function computeFred(): Promise<Partial<RegimeInputs>> {
   const cosd = new Date(Date.now() - 300 * 864e5).toISOString().slice(0, 10);
   const [walcl, wdtgal, rrp, dgs2, dgs10, dxy] = await Promise.all([
-    fetchCsv('WALCL', cosd), fetchCsv('WDTGAL', cosd), fetchCsv('RRPONTSYD', cosd),
-    fetchCsv('DGS2', cosd), fetchCsv('DGS10', cosd), fetchCsv('DTWEXBGS', cosd),
+    fetchSeries('WALCL', cosd), fetchSeries('WDTGAL', cosd), fetchSeries('RRPONTSYD', cosd),
+    fetchSeries('DGS2', cosd), fetchSeries('DGS10', cosd), fetchSeries('DTWEXBGS', cosd),
   ]);
   const axis = businessDays(new Date(Date.now() - 220 * 864e5)).slice(-120);
   const fedDaily = fill(axis, walcl, 1 / 1000);

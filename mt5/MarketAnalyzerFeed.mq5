@@ -11,8 +11,8 @@
 #property copyright "Market Analyzer"
 #property version   "1.00"
 
-input string InpServerUrl = "https://YOUR-APP.vercel.app/api/ingest"; // Ingest endpoint (whitelist this URL)
-input string InpSecret    = "change-me-to-match-INGEST_SECRET";       // Must equal INGEST_SECRET on the server
+input string InpServerUrl = "https://marketanalyzer-amber.vercel.app/api/ingest"; // Ingest endpoint (whitelist the origin)
+input string InpSecret    = "175f9d04bf47be063e9f946ded2fcff2";                  // Matches server INGEST_SECRET
 input string InpSymbol    = "XAUUSD.sc"; // Vantage gold symbol ("" = use the chart symbol)
 input int    InpTimerSec  = 30;        // Push interval (seconds)
 input int    InpCandles   = 200;       // Candles per timeframe to send
