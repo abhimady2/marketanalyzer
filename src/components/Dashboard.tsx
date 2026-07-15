@@ -139,7 +139,7 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
       {/* LIVE MARKET PULSE */}
       {(narrative?.live || snap.headlines.length > 0) && (
         <section className="card" style={{ marginTop: 16 }}>
-          <h2>Live Market Pulse{narrative?.live && <span className={`chip ${labelChip(narrative.live.label)}`} style={{ marginLeft: 8 }}>{narrative.live.label} · {narrative.live.impact} impact</span>}</h2>
+          <h2>Live Market Pulse{narrative?.live && <span className={`chip ${labelChip(narrative.live.label)}`}>{narrative.live.label} · {narrative.live.impact} impact</span>}</h2>
           {narrative?.live && <p style={{ color: 'var(--text-dim)', fontSize: 14.5, lineHeight: 1.6, marginBottom: snap.headlines.length ? 14 : 0 }}>{narrative.live.summary}</p>}
           {snap.headlines.slice(0, 6).map((h, i) => (
             <div className="hl" key={i}>
@@ -196,7 +196,7 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
 
       {/* NEWS */}
       <section className="card" style={{ marginTop: 16 }}>
-        <h2>High-Impact Forex News {n.eventRiskSoon && <span className="chip warn" style={{ marginLeft: 8 }}>Event within 24h</span>}</h2>
+        <h2>High-Impact Forex News {n.eventRiskSoon && <span className="chip warn">Event within 24h</span>}</h2>
         {n.events.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No high-impact events (or feed unavailable).</p>}
         {n.events.map((e: any, i: number) => (
           <div className="ev" key={i}>
