@@ -166,6 +166,11 @@ a { color: var(--gold-bright); text-decoration: none; }
 .imp-Low { color: var(--text-muted); background: rgba(124,138,156,.12); border-color: rgba(124,138,156,.3); }
 .imp-Holiday { color: var(--text-muted); background: rgba(124,138,156,.1); border-color: rgba(124,138,156,.25); }
 
+/* ── news event countdown ── */
+.ev-right { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.cd { font-size: 10.5px; font-weight: 700; color: var(--gold-bright); letter-spacing: .3px; }
+.cd:empty { display: none; }
+
 /* ── update flash + card entrance ── */
 .hero.flash { animation: flashpulse .8s ease-out; }
 @keyframes flashpulse { 0% { border-color: var(--gold); box-shadow: 0 0 22px 0 rgba(212,175,55,.28); } 100% { border-color: var(--border); box-shadow: none; } }

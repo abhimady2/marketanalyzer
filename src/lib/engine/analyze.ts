@@ -67,12 +67,15 @@ async function getRegimeInputs(): Promise<RegimeInputs> {
 
 export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
   const t0 = Date.now();
-  const [inputs, candles, news, spot, headlines] = await Promise.all([
+  // Fast layer (every poll): candles/news/spot come mostly from the MT5 feed in
+  // Supabase — cheap. Headlines (Google News RSS) are only fetched on the narrative
+  // runs to avoid rate-limiting; otherwise carried from the previous snapshot.
+  const [inputs, candles, news, spot, freshHeadlines] = await Promise.all([
     getRegimeInputs(),
     safe(fetchAllTimeframes(), emptyTF()),
     safe(fetchNews(), { events: [], upcomingHighUSD: [], eventRiskSoon: false, source: 'none' as const, at: Date.now() }),
     safe(fetchSpot(), null),
-    safe(fetchHeadlines(), [] as Headline[]),
+    withNarrative ? safe(fetchHeadlines(), [] as Headline[]) : Promise.resolve([] as Headline[]),
   ]);
 
   const regime = computeRegime(inputs);
@@ -80,8 +83,13 @@ export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
   const verdict = fuse(regime, technical, news, spot);
 
   let narrative: Narrative | null = withNarrative
-    ? await safe(generateNarrative(verdict, regime, technical, news, headlines), null) : null;
-  if (!narrative) { const prev = await getLatestSnapshot(); narrative = prev?.narrative ?? null; } // keep last AI text
+    ? await safe(generateNarrative(verdict, regime, technical, news, freshHeadlines), null) : null;
+  let headlines = freshHeadlines;
+  if (!narrative || !withNarrative) {
+    const prev = await getLatestSnapshot();
+    narrative = narrative ?? prev?.narrative ?? null;     // keep last AI text
+    if (!withNarrative) headlines = prev?.headlines ?? []; // carry headlines on fast polls
+  }
 
   if (narrative?.live && narrative.live.impact === 'High' && narrative.live.label !== 'Neutral') {
     verdict.cautions.push(`Live headlines skew ${narrative.live.label.toLowerCase()} (high impact): ${narrative.live.summary}`);

@@ -25,6 +25,9 @@ export interface NewsResult {
 const FEED = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
 
 function normalize(raw: any[], now: number, source: NewsResult['source']): NewsResult {
+  // Show only events still ahead (with a 30-min grace so a just-released print with
+  // its actual lingers briefly) — never yesterday's finished events.
+  const GRACE_MS = 30 * 60 * 1000;
   const events: NewsEvent[] = raw.map((e) => {
     const country = String(e.country || '').toUpperCase();
     const impact = String(e.impact || 'Low');
@@ -35,7 +38,7 @@ function normalize(raw: any[], now: number, source: NewsResult['source']): NewsR
       forecast: String(e.forecast ?? ''), previous: String(e.previous ?? ''),
       actual: e.actual != null ? String(e.actual) : undefined, goldRelevant,
     };
-  }).filter((e) => e.goldRelevant && e.date);
+  }).filter((e) => e.goldRelevant && e.date && +new Date(e.date) >= now - GRACE_MS);
 
   events.sort((a, b) => +new Date(a.date) - +new Date(b.date));
   const upcomingHighUSD = events.filter((e) => e.country === 'USD' && e.impact === 'High' && +new Date(e.date) >= now);

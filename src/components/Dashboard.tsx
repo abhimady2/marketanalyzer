@@ -12,6 +12,16 @@ const labelChip = (l: string) => l === 'Bullish' ? 'bull' : l === 'Bearish' ? 'b
 const barColor = (b: number) => b > 0.15 ? 'var(--bull)' : b < -0.15 ? 'var(--bear)' : 'var(--neutral)';
 const fmtWhen = (iso: string) => { const d = new Date(iso); return isNaN(+d) ? '' : d.toUTCString().slice(0, 22) + ' UTC'; };
 const agoStr = (ms: number) => { const m = Math.round(ms / 60000); return m < 1 ? 'now' : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`; };
+const countdown = (iso: string, now: number | null) => {
+  if (now == null) return '';
+  const ms = +new Date(iso) - now;
+  if (Number.isNaN(ms)) return '';
+  if (ms < 0) return 'live';
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `in ${mins}m`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h < 24 ? `in ${h}h${m ? ` ${m}m` : ''}` : `in ${Math.round(h / 24)}d`;
+};
 
 function Sparkline({ data }: { data: number[] }) {
   if (!data || data.length < 2) return null;
@@ -191,8 +201,8 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
         {n.events.map((e: any, i: number) => (
           <div className="ev" key={i}>
             <span className={`impact-badge imp-${(e.impact || 'Low')}`}>{e.impact || 'Low'} Impact</span>
-            <span><span className="t">{e.title}</span><div className="when">{fmtWhen(e.date)}{e.forecast ? ` · forecast ${e.forecast}` : ''}{e.previous ? ` · prev ${e.previous}` : ''}{e.actual ? ` · actual ${e.actual}` : ''}</div></span>
-            <span className="cc">{e.country}</span>
+            <span><span className="t">{e.title}</span><div className="when">{fmtWhen(e.date)}{e.forecast ? ` · fc ${e.forecast}` : ''}{e.previous ? ` · prev ${e.previous}` : ''}{e.actual ? ` · act ${e.actual}` : ''}</div></span>
+            <span className="ev-right"><span className="cd">{countdown(e.date, now)}</span><span className="cc">{e.country}</span></span>
           </div>
         ))}
       </section>
