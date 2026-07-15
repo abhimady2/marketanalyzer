@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const STALE_MS = 20 * 1000;
+const STALE_MS = 8 * 1000; // scalp needs freshness; recompute is cheap (MT5 feed from Supabase, macro cached)
 const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
 

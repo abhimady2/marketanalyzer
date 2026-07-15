@@ -22,6 +22,10 @@ const countdown = (iso: string, now: number | null) => {
   const h = Math.floor(mins / 60), m = mins % 60;
   return h < 24 ? `in ${h}h${m ? ` ${m}m` : ''}` : `in ${Math.round(h / 24)}d`;
 };
+const arrow = (d: string) => d === 'up' ? '▲' : d === 'down' ? '▼' : '–';
+const arrowCls = (d: string) => d === 'up' ? 'bull-t' : d === 'down' ? 'bear-t' : 'unknown-t';
+const scalpText = (s: string) => s === 'TAKE_LONG' ? 'TAKE LONGS' : s === 'TAKE_SHORT' ? 'TAKE SHORTS' : 'STAND ASIDE';
+const scalpTone = (s: string) => s === 'TAKE_LONG' ? 'long' : s === 'TAKE_SHORT' ? 'short' : 'wait';
 
 function Sparkline({ data }: { data: number[] }) {
   if (!data || data.length < 2) return null;
@@ -69,16 +73,18 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
         if (alive && j?.snapshot?.at) setSnap((prev) => (j.snapshot.at !== prev.at ? j.snapshot : prev));
       } catch { /* keep last */ }
     };
-    const id = setInterval(poll, 15000);
+    poll();
+    const id = setInterval(poll, 8000);
     return () => { alive = false; clearInterval(id); };
   }, []);
 
   useEffect(() => { setNow(Date.now()); const id = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(id); }, []);
   useEffect(() => { setFlash(true); const id = setTimeout(() => setFlash(false), 800); return () => clearTimeout(id); }, [snap.at]);
 
-  const { verdict: v, regime: r, technical: t, news: n, narrative } = snap;
+  const { verdict: v, regime: r, technical: t, news: n, narrative, scalp: sc } = snap;
   const ageSecs = now != null ? Math.max(0, Math.round((now - snap.at) / 1000)) : null;
   const markerPos = ((Math.max(-1, Math.min(1, v.bias)) + 1) / 2) * 100;
+  const holdLabel = sc.state === 'TAKE_LONG' ? 'Hold above' : sc.state === 'TAKE_SHORT' ? 'Hold below' : 'Flip level';
 
   return (
     <main className="container">
@@ -96,8 +102,29 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
         </div>
       </div>
 
+      {/* SCALP CONSOLE — the $1 / 100-point trigger */}
+      <section className={`card scalp scalp-${scalpTone(sc.state)}${flash ? ' flash' : ''}`} style={{ marginTop: 18 }}>
+        <div className="scalp-head">
+          <div className="scalp-signal">
+            <span className="scalp-state">{scalpText(sc.state)}</span>
+            <span className="scalp-tp">$1 · {sc.tpPoints}pt target</span>
+          </div>
+          {sc.state !== 'WAIT' && <div className="scalp-conf">{sc.confidence}%</div>}
+        </div>
+        {sc.flipped && <div className="scalp-flip">⚠ Direction flipped — close / stop the opposite side.</div>}
+        <div className="scalp-reason">{sc.reason}</div>
+        <div className="scalp-stats">
+          <div><span className="k">M1</span><span className={`v ${arrowCls(sc.m1)}`}>{arrow(sc.m1)} {sc.m1}</span></div>
+          <div><span className="k">M5</span><span className={`v ${arrowCls(sc.m5)}`}>{arrow(sc.m5)} {sc.m5}</span></div>
+          <div><span className="k">Higher-TF tide</span><span className={`v ${arrowCls(sc.higherBias)}`}>{arrow(sc.higherBias)} {sc.higherBias}</span></div>
+          <div><span className="k">Spread</span><span className="v">{sc.spreadPoints != null ? `${sc.spreadPoints} pt` : '—'}</span></div>
+          <div><span className="k">{holdLabel}</span><span className="v mono">{sc.flipLevel != null ? sc.flipLevel.toFixed(2) : '—'}</span></div>
+          <div><span className="k">Next event</span><span className="v">{sc.minsToEvent != null ? `${sc.minsToEvent}m` : 'clear'}</span></div>
+        </div>
+      </section>
+
       {/* VERDICT HERO */}
-      <section className={`card hero${flash ? ' flash' : ''}`} style={{ marginTop: 18 }}>
+      <section className={`card hero${flash ? ' flash' : ''}`} style={{ marginTop: 16 }}>
         <div className="hero-row">
           <div>
             <div className={`dir ${dirClass(v.direction)}`}>{v.grade}</div>

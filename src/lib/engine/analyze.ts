@@ -12,15 +12,18 @@ import { fetchAllTimeframes } from '@/lib/data/candles';
 import { fetchNews } from '@/lib/data/news';
 import { fetchSpot } from '@/lib/data/price';
 import { fetchHeadlines, type Headline } from '@/lib/data/headlines';
+import { readMt5Feed } from '@/lib/data/mt5';
 import type { Candle, Timeframe } from '@/lib/data/candles';
 import { computeRegime, type RegimeInputs, type RegimeResult } from './regime';
 import { computeTechnical, type TechnicalResult } from './technical';
 import { fuse, type Verdict } from './fusion';
+import { computeScalp, type ScalpSignal } from './scalp';
 import { generateNarrative, type Narrative } from './narrative';
 import { getSupabase } from '@/lib/supabase';
 
 export interface Snapshot {
   verdict: Verdict;
+  scalp: ScalpSignal;
   regime: RegimeResult;
   technical: TechnicalResult;
   news: { events: any[]; upcomingHighUSD: any[]; eventRiskSoon: boolean; source: string };
@@ -70,26 +73,32 @@ export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
   // Fast layer (every poll): candles/news/spot come mostly from the MT5 feed in
   // Supabase — cheap. Headlines (Google News RSS) are only fetched on the narrative
   // runs to avoid rate-limiting; otherwise carried from the previous snapshot.
-  const [inputs, candles, news, spot, freshHeadlines] = await Promise.all([
+  const [inputs, candles, news, spot, freshHeadlines, mt5, prev] = await Promise.all([
     getRegimeInputs(),
     safe(fetchAllTimeframes(), emptyTF()),
     safe(fetchNews(), { events: [], upcomingHighUSD: [], eventRiskSoon: false, source: 'none' as const, at: Date.now() }),
     safe(fetchSpot(), null),
     withNarrative ? safe(fetchHeadlines(), [] as Headline[]) : Promise.resolve([] as Headline[]),
+    safe(readMt5Feed(), null),
+    getLatestSnapshot(),   // previous snapshot: narrative carry + scalp flip detection
   ]);
 
   const regime = computeRegime(inputs);
   const technical = computeTechnical(candles);
   const verdict = fuse(regime, technical, news, spot);
 
+  // Fast scalp signal from the MT5 M1/M5 feed (the $1 / 100-point trigger).
+  const scalp = computeScalp({
+    m1: mt5?.candles?.['1m'] ?? [], m5: mt5?.candles?.['5m'] ?? [],
+    technical, goldMacroBias: verdict.goldMacroBias,
+    bid: mt5?.price?.bid ?? null, ask: mt5?.price?.ask ?? null,
+    upcomingHighUSD: news.upcomingHighUSD, prevState: prev?.scalp?.state ?? null, now: Date.now(),
+  });
+
   let narrative: Narrative | null = withNarrative
     ? await safe(generateNarrative(verdict, regime, technical, news, freshHeadlines), null) : null;
-  let headlines = freshHeadlines;
-  if (!narrative || !withNarrative) {
-    const prev = await getLatestSnapshot();
-    narrative = narrative ?? prev?.narrative ?? null;     // keep last AI text
-    if (!withNarrative) headlines = prev?.headlines ?? []; // carry headlines on fast polls
-  }
+  narrative = narrative ?? prev?.narrative ?? null;                     // keep last AI text
+  const headlines = withNarrative ? freshHeadlines : (prev?.headlines ?? []); // carry on fast polls
 
   if (narrative?.live && narrative.live.impact === 'High' && narrative.live.label !== 'Neutral') {
     verdict.cautions.push(`Live headlines skew ${narrative.live.label.toLowerCase()} (high impact): ${narrative.live.summary}`);
@@ -98,7 +107,7 @@ export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
   const spark = (candles['15m']?.length ? candles['15m'] : candles['1h'] || []).slice(-96).map((c) => c.c);
 
   const snapshot: Snapshot = {
-    verdict, regime, technical,
+    verdict, scalp, regime, technical,
     news: { events: news.events.slice(0, 12), upcomingHighUSD: news.upcomingHighUSD.slice(0, 6), eventRiskSoon: news.eventRiskSoon, source: news.source },
     headlines: headlines.slice(0, 10),
     narrative, spark, at: Date.now(), computeMs: Date.now() - t0,

@@ -1,0 +1,174 @@
+// Scalp Console — calibrated for the $1 / 100-point continuous manual-scalp strategy.
+// The FAST micro-trend (M1 + M5, from the MT5 broker feed) is the trigger; the
+// higher timeframes + macro are only a "don't fight the tide" filter; high-impact
+// events, chop (M1/M5 disagree) and a wide spread force STAND-ASIDE. Mode: Balanced
+// — take when M1+M5 align and H1 isn't strongly opposed; wait near events / in chop.
+//
+// This is a permission/direction signal refreshed every ~10-20s, NOT a tick execution
+// algo: $1 on gold is near the spread/noise floor, so it tilts odds, not certainty.
+
+import type { Candle } from '@/lib/data/candles';
+import { ema, type TechnicalResult } from './technical';
+
+export type ScalpState = 'TAKE_LONG' | 'TAKE_SHORT' | 'WAIT';
+
+export interface ScalpSignal {
+  state: ScalpState;
+  reason: string;
+  microDir: 'up' | 'down' | 'mixed';
+  m1: 'up' | 'down' | 'flat';
+  m5: 'up' | 'down' | 'flat';
+  higherBias: 'up' | 'down' | 'neutral';
+  spreadPoints: number | null;   // (ask-bid) in points; 100 points = $1
+  tpPoints: number;              // target: 100 points ($1)
+  tpRealistic: boolean;
+  minsToEvent: number | null;
+  nextEvent: string | null;
+  flipLevel: number | null;      // micro-trend invalidation price (M5 EMA21)
+  flipped: boolean;              // direction changed vs the previous signal
+  confidence: number;            // 0..100
+  available: boolean;
+}
+
+const TP_POINTS = 100;          // $1.00 on XAUUSD (0.01 = 1 point)
+const EVENT_BLOCK_MIN = 15;     // Balanced: stand aside within 15 min of a high-impact event
+const SPREAD_MAX_POINTS = 40;   // >40% of the 100-pt target = too costly
+
+function atr(c: Candle[], p = 14): number | null {
+  if (c.length < p + 1) return null;
+  let s = 0;
+  for (let i = c.length - p; i < c.length; i++) {
+    s += Math.max(c[i].h - c[i].l, Math.abs(c[i].h - c[i - 1].c), Math.abs(c[i].l - c[i - 1].c));
+  }
+  return s / p;
+}
+
+function micro(c: Candle[]): { dir: -1 | 0 | 1; strength: number; ema21: number | null } {
+  const closes = c.map((x) => x.c);
+  if (closes.length < 25) return { dir: 0, strength: 0, ema21: null };
+  const e9 = ema(closes, 9)!, e21 = ema(closes, 21)!, a = atr(c, 14) || 1;
+  const price = closes[closes.length - 1];
+  const trendUp = e9 > e21, aboveE9 = price > e9;
+  const dir: -1 | 0 | 1 = trendUp && aboveE9 ? 1 : !trendUp && !aboveE9 ? -1 : 0;
+  return { dir, strength: Math.min(1, Math.abs(e9 - e21) / a), ema21: e21 };
+}
+
+const stateDir = (s: ScalpState) => s === 'TAKE_LONG' ? 'long' : s === 'TAKE_SHORT' ? 'short' : 'wait';
+
+export interface ScalpArgs {
+  m1: Candle[]; m5: Candle[];
+  technical: TechnicalResult;
+  goldMacroBias: number | null;
+  bid: number | null; ask: number | null;
+  upcomingHighUSD: { title: string; date: string }[];
+  prevState: ScalpState | null;
+  now: number;
+}
+
+export function computeScalp(a: ScalpArgs): ScalpSignal {
+  const off = (reason: string): ScalpSignal => ({
+    state: 'WAIT', reason, microDir: 'mixed', m1: 'flat', m5: 'flat', higherBias: 'neutral',
+    spreadPoints: a.ask != null && a.bid != null ? Math.round((a.ask - a.bid) * 100) : null,
+    tpPoints: TP_POINTS, tpRealistic: false, minsToEvent: null, nextEvent: null,
+    flipLevel: null, flipped: false, confidence: 0, available: false,
+  });
+
+  if (a.m1.length < 25 || a.m5.length < 25) return off('Waiting for M1/M5 candles from the MT5 EA.');
+
+  const m1 = micro(a.m1), m5 = micro(a.m5);
+  const dirWord = (d: number) => d > 0 ? 'up' : d < 0 ? 'down' : 'flat';
+  const align = m1.dir !== 0 && m1.dir === m5.dir;
+  const microDir: ScalpSignal['microDir'] = align ? (m1.dir > 0 ? 'up' : 'down') : 'mixed';
+
+  // Higher-TF filter: the H1 trend (blended with macro) as the tide.
+  const h1 = a.technical.timeframes.find((t) => t.tf === '1h');
+  const h1Dir = h1?.available ? Math.sign(h1.score) : 0;
+  const macroDir = a.goldMacroBias != null ? Math.sign(a.goldMacroBias) : 0;
+  const higherBias: ScalpSignal['higherBias'] = h1Dir > 0 || (h1Dir === 0 && macroDir > 0) ? 'up'
+    : h1Dir < 0 || (h1Dir === 0 && macroDir < 0) ? 'down' : 'neutral';
+  const strongHigher = !!h1?.available && Math.abs(h1.score) > 0.4 && (h1.strength ?? 0) > 22;
+  const opposed = align && strongHigher && Math.sign(h1!.score) === -m1.dir;
+
+  // Spread + events.
+  const spreadPoints = a.ask != null && a.bid != null ? Math.round((a.ask - a.bid) * 100) : null;
+  const spreadWide = spreadPoints != null && spreadPoints > SPREAD_MAX_POINTS;
+  let minsToEvent: number | null = null; let nextEvent: string | null = null;
+  for (const e of a.upcomingHighUSD) {
+    const mins = (+new Date(e.date) - a.now) / 60000;
+    if (mins >= 0 && (minsToEvent == null || mins < minsToEvent)) { minsToEvent = Math.round(mins); nextEvent = e.title; }
+  }
+  const eventSoon = minsToEvent != null && minsToEvent <= EVENT_BLOCK_MIN;
+
+  // Balanced decision.
+  let state: ScalpState = 'WAIT'; let reason = '';
+  if (eventSoon) reason = `${nextEvent} in ${minsToEvent}m — stand aside for the spike.`;
+  else if (!align) reason = m1.dir === m5.dir ? 'No micro-trend (M1/M5 flat) — wait.' : 'M1 and M5 disagree — chop, wait for alignment.';
+  else if (opposed) reason = `M1/M5 ${microDir} but H1 strongly ${higherBias === 'up' ? 'bullish' : 'bearish'} — don't scalp against the higher trend.`;
+  else if (spreadWide) reason = `Spread ${spreadPoints}pt is wide vs the 100-pt target — wait for it to tighten.`;
+  else {
+    state = m1.dir > 0 ? 'TAKE_LONG' : 'TAKE_SHORT';
+    const withTide = strongHigher && Math.sign(h1!.score) === m1.dir;
+    reason = `M1+M5 aligned ${microDir}${withTide ? ', with the H1 trend' : ''}. Take $1 scalps ${m1.dir > 0 ? 'long' : 'short'} while it holds.`;
+  }
+
+  const flipLevel = m5.ema21;
+  const prevDir = a.prevState ? stateDir(a.prevState) : null;
+  const nowDir = stateDir(state);
+  const flipped = !!prevDir && prevDir !== 'wait' && nowDir !== 'wait' && prevDir !== nowDir;
+
+  const tpRealistic = state !== 'WAIT';
+  // Confidence: micro alignment strength, boosted when the higher tide agrees, zeroed on WAIT.
+  const alignStrength = align ? (m1.strength + m5.strength) / 2 : 0;
+  const tideBonus = state !== 'WAIT' && strongHigher && Math.sign(h1!.score) === m1.dir ? 0.2 : 0;
+  const confidence = state === 'WAIT' ? 0 : Math.round(Math.min(100, (0.5 + Math.min(0.3, alignStrength) + tideBonus) * 100));
+
+  return {
+    state, reason, microDir, m1: dirWord(m1.dir) as any, m5: dirWord(m5.dir) as any, higherBias,
+    spreadPoints, tpPoints: TP_POINTS, tpRealistic, minsToEvent, nextEvent,
+    flipLevel, flipped, confidence, available: true,
+  };
+}
+
+// ── self-check (npx tsx src/lib/engine/scalp.ts) ─────────────────────────────
+export function demo(): void {
+  const assert = (c: boolean, m: string) => { if (!c) throw new Error('FAIL: ' + m); };
+  const ramp = (n: number, dir: number, start = 4000): Candle[] =>
+    Array.from({ length: n }, (_, i) => { const b = start + dir * i * 0.5; return { t: i, o: b, h: b + 0.3, l: b - 0.3, c: b + dir * 0.2, v: 10 }; });
+  const tech = (h1score: number, adx: number): TechnicalResult => ({
+    bias: h1score, label: 'Neutral', confidence: 50, available: true,
+    timeframes: [{ tf: '1h', score: h1score, label: h1score > 0 ? 'Bullish' : 'Bearish', strength: adx, available: true, signals: [] }] as any,
+  });
+  const base = { technical: tech(0, 10), goldMacroBias: 0, bid: 4000.0, ask: 4000.2, upcomingHighUSD: [], prevState: null, now: 0 };
+
+  // Aligned up-trend, calm higher-TF → TAKE_LONG.
+  const up = computeScalp({ ...base, m1: ramp(40, 1), m5: ramp(40, 1) });
+  assert(up.state === 'TAKE_LONG', `aligned up should take long, got ${up.state}`);
+
+  // Aligned down → TAKE_SHORT.
+  const dn = computeScalp({ ...base, m1: ramp(40, -1, 4000), m5: ramp(40, -1, 4000) });
+  assert(dn.state === 'TAKE_SHORT', `aligned down should take short, got ${dn.state}`);
+
+  // M1 up, M5 down → chop → WAIT.
+  const chop = computeScalp({ ...base, m1: ramp(40, 1), m5: ramp(40, -1, 4000) });
+  assert(chop.state === 'WAIT' && chop.microDir === 'mixed', 'disagreement should WAIT');
+
+  // Aligned up but H1 strongly bearish → opposed → WAIT.
+  const opp = computeScalp({ ...base, technical: tech(-0.6, 30), m1: ramp(40, 1), m5: ramp(40, 1) });
+  assert(opp.state === 'WAIT', `counter-trend should WAIT, got ${opp.state}`);
+
+  // Event in 5 min → WAIT.
+  const ev = computeScalp({ ...base, m1: ramp(40, 1), m5: ramp(40, 1), upcomingHighUSD: [{ title: 'CPI', date: new Date(5 * 60000).toISOString() }] });
+  assert(ev.state === 'WAIT' && /CPI/.test(ev.reason), 'imminent event should WAIT');
+
+  // Wide spread → WAIT.
+  const sp = computeScalp({ ...base, m1: ramp(40, 1), m5: ramp(40, 1), bid: 4000.0, ask: 4000.6 });
+  assert(sp.state === 'WAIT' && /Spread/.test(sp.reason), 'wide spread should WAIT');
+
+  // Flip detection: prev long, now short.
+  const flip = computeScalp({ ...base, m1: ramp(40, -1, 4000), m5: ramp(40, -1, 4000), prevState: 'TAKE_LONG' });
+  assert(flip.state === 'TAKE_SHORT' && flip.flipped, 'long→short should flag flipped');
+
+  console.log('scalp.ts demo OK —', `up=${up.state}(${up.confidence}), dn=${dn.state}, chop=${chop.state}, opp=${opp.state}, ev=${ev.state}, flip=${flip.flipped}`);
+}
+
+if (typeof require !== 'undefined' && require.main === module) demo();

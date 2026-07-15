@@ -1,12 +1,12 @@
 // Reads the latest MT5 EA push from ma_cache ('mt5:feed'). candles.ts and price.ts
 // prefer this real-broker XAUUSD data over Binance/gold-api when it's fresh.
 import { getSupabase } from '@/lib/supabase';
-import type { Candle, Timeframe } from './candles';
+import type { Candle } from './candles';
 
 export interface Mt5Feed {
   symbol: string;
   price: { bid: number; ask: number; last: number; time: number } | null;
-  candles: Partial<Record<Timeframe, Candle[]>> | null;
+  candles: Record<string, Candle[]> | null; // keyed by tf incl '1m'/'5m' for scalp
   news: any[] | null; // MT5 economic calendar events
   at: number;
   ageMs: number;

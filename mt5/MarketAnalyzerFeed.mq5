@@ -14,8 +14,10 @@
 input string InpServerUrl = "https://marketanalyzer-amber.vercel.app/api/ingest"; // Ingest endpoint (whitelist the origin)
 input string InpSecret    = "175f9d04bf47be063e9f946ded2fcff2";                  // Matches server INGEST_SECRET
 input string InpSymbol    = "XAUUSD.sc"; // Vantage gold symbol ("" = use the chart symbol)
-input int    InpTimerSec  = 30;        // Push interval (seconds)
+input int    InpTimerSec  = 10;        // Push interval (seconds) — 10s for scalp freshness
 input int    InpCandles   = 200;       // Candles per timeframe to send
+input bool   InpSendM1    = true;      // Push M1 candles (fast scalp signal)
+input bool   InpSendM5    = true;      // Push M5 candles (fast scalp signal)
 input bool   InpSendM15   = true;
 input bool   InpSendH1    = true;
 input bool   InpSendH4    = true;
@@ -138,6 +140,8 @@ void PushFeed()
 
    string tf = "";
    bool   first = true;
+   if(InpSendM1)  { tf += (first?"":",") + string("\"1m\":")  + CandlesJson(PERIOD_M1,  InpCandles); first = false; }
+   if(InpSendM5)  { tf += (first?"":",") + string("\"5m\":")  + CandlesJson(PERIOD_M5,  InpCandles); first = false; }
    if(InpSendM15) { tf += (first?"":",") + string("\"15m\":") + CandlesJson(PERIOD_M15, InpCandles); first = false; }
    if(InpSendH1)  { tf += (first?"":",") + string("\"1h\":")  + CandlesJson(PERIOD_H1,  InpCandles); first = false; }
    if(InpSendH4)  { tf += (first?"":",") + string("\"4h\":")  + CandlesJson(PERIOD_H4,  InpCandles); first = false; }
