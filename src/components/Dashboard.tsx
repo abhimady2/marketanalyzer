@@ -112,7 +112,12 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
             <span className="scalp-state">{scalpText(sc.state)}</span>
             <span className="scalp-tp">$1 · {sc.tpPoints}pt target</span>
           </div>
-          {sc.state !== 'WAIT' && <div className="scalp-conf">{sc.confidence}%</div>}
+          {sc.state !== 'WAIT' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <div className="scalp-conf">{sc.confidence}%</div>
+              <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-muted)' }}>Confidence</div>
+            </div>
+          )}
         </div>
         {sc.flipped && <div className="scalp-flip">⚠ Direction flipped — close / stop the opposite side.</div>}
         <div className="scalp-reason">{sc.reason}</div>
