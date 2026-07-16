@@ -25,11 +25,13 @@ import { computeScalp, microContext, type ScalpSignal } from './scalp';
 import { computeLevels, type LevelsResult } from './levels';
 import { generateNarrative, type Narrative } from './narrative';
 import { generateEventOutlook, type EventOutlook } from './outlook';
+import { shouldEmit, emitSignal, type TradeSignal } from './signals';
 import { getSupabase } from '@/lib/supabase';
 
 export interface Snapshot {
   verdict: Verdict;
   scalp: ScalpSignal;
+  lastSignal: TradeSignal | null;
   levels: LevelsResult;
   regime: RegimeResult;
   technical: TechnicalResult;
@@ -117,6 +119,14 @@ export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
     prevState: prev?.scalp?.state ?? null, now: Date.now(),
   });
 
+  // Dispatch a trade signal to the paper-trader the moment the scalp turns actionable
+  // (>75% conviction). Once per episode — never re-fired while the same call persists.
+  let lastSignal: TradeSignal | null = prev?.lastSignal ?? null;
+  if (shouldEmit(scalp, prev?.scalp ?? null)) {
+    const s = await safe(emitSignal(scalp, mt5?.price?.bid ?? null, mt5?.price?.ask ?? null, livePrice, levels), null);
+    if (s) lastSignal = s;
+  }
+
   // AI layer (narrative + next-event outlook) — raced together, only when needed.
   let narrative: Narrative | null = null;
   let outlook: EventOutlook | null = null;
@@ -145,7 +155,7 @@ export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
   const at = Date.now();
 
   const snapshot: Snapshot = {
-    verdict, scalp, levels, regime, technical,
+    verdict, scalp, lastSignal, levels, regime, technical,
     news: { events: news.events.slice(0, 12), upcomingHighUSD: news.upcomingHighUSD.slice(0, 6), eventRiskSoon: news.eventRiskSoon, source: news.source },
     headlines: headlines.slice(0, 10),
     narrative, outlook, narrativeAt,
