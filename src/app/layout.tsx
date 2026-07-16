@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from 'next';
+import { Outfit } from 'next/font/google';
 import './globals.css';
+
+const outfit = Outfit({ subsets: ['latin'], display: 'swap' });
 
 export const metadata: Metadata = {
   title: 'XAUUSD Market Analyzer — Macro Regime + Trend Verdict',
@@ -15,7 +18,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={outfit.className}>
       <body>{children}</body>
     </html>
   );
