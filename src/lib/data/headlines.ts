@@ -21,7 +21,12 @@ function decode(s: string): string {
 }
 
 export async function fetchHeadlines(limit = 18): Promise<Headline[]> {
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(QUERY)}&hl=en-US&gl=US&ceid=US:en`;
+  return googleNews(QUERY, limit);
+}
+
+// Generic Google-News RSS search — reused for per-event web research (free, no key).
+export async function googleNews(query: string, limit = 12): Promise<Headline[]> {
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
   try {
     const r = await fetch(url, {
       signal: AbortSignal.timeout(8000),

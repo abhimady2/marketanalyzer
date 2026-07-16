@@ -23,6 +23,13 @@ const countdown = (iso: string, now: number | null) => {
   const h = Math.floor(mins / 60), m = mins % 60;
   return h < 24 ? `in ${h}h${m ? ` ${m}m` : ''}` : `in ${Math.round(h / 24)}d`;
 };
+const fmtAge = (ms: number | null | undefined) => {
+  if (ms == null) return '—';
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h`;
+};
+const leanText = (l: string) => l === 'pump' ? 'GOLD PUMPS' : l === 'dump' ? 'GOLD DUMPS' : 'NO CLEAR LEAN';
+const leanCls = (l: string) => l === 'pump' ? 'bull-t' : l === 'dump' ? 'bear-t' : 'neutral-t';
 const arrow = (d: string) => d === 'up' ? '▲' : d === 'down' ? '▼' : '–';
 const arrowCls = (d: string) => d === 'up' ? 'bull-t' : d === 'down' ? 'bear-t' : 'unknown-t';
 const scalpText = (s: string) => s === 'TAKE_LONG' ? 'TAKE LONGS' : s === 'TAKE_SHORT' ? 'TAKE SHORTS' : 'STAND ASIDE';
@@ -107,6 +114,9 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
   useEffect(() => { setFlash(true); const id = setTimeout(() => setFlash(false), 800); return () => clearTimeout(id); }, [snap.at]);
 
   const { verdict: v, regime: r, technical: t, news: n, narrative, scalp: sc } = snap;
+  const ol = snap.outlook;
+  const f = snap.freshness ?? { mt5AgeMs: null, macroAgeMs: null, narrativeAgeMs: null, newsSource: '—' };
+  const mt5Stale = f.mt5AgeMs != null && f.mt5AgeMs > 120_000;
   const lv = snap.levels ?? { levels: [], atLevel: null, warning: null, roomLongPoints: null, roomShortPoints: null, available: false } as any;
   const resList: Level[] = (lv.levels ?? []).filter((l: Level) => l.kind === 'resistance').sort((a: Level, b: Level) => b.price - a.price);
   const supList: Level[] = (lv.levels ?? []).filter((l: Level) => l.kind === 'support').sort((a: Level, b: Level) => b.price - a.price);
@@ -132,6 +142,10 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
           <span className="live-badge"><i className="live-dot" /> LIVE{ageSecs != null ? ` · ${ageSecs < 60 ? `${ageSecs}s` : agoStr(now! - snap.at)} ago` : ''}</span>
         </div>
       </div>
+
+      {mt5Stale && (
+        <div className="mt5-warn">⚠ MT5 feed is {fmtAge(f.mt5AgeMs)} old — the EA may be down on the VPS. The scalp trigger needs live M1/M5; price/candles are falling back to public data.</div>
+      )}
 
       {/* SCALP CONSOLE — the $1 / 100-point trigger */}
       <section className={`card scalp scalp-${scalpTone(sc.state)}${flash ? ' flash' : ''}`} style={{ marginTop: 18 }}>
@@ -224,6 +238,34 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
         )}
       </section>
 
+      {/* WHAT COULD HAPPEN — web-grounded next-event playbook */}
+      {ol && (
+        <section className="card outlook" style={{ marginTop: 16 }}>
+          <h2>What Could Happen · {ol.event}
+            <span className="chip">{ol.country} · {ol.impact}</span>
+            {now != null && <span className="chip">{countdown(ol.when, now)}</span>}
+          </h2>
+          <div className="ol-lean">
+            <span className={`ol-dir ${leanCls(ol.lean)}`}>{leanText(ol.lean)}</span>
+            <span className="ol-prob">{ol.probability}%</span>
+            <span className={`lvl-chip rel-${ol.reliability}`}>{ol.reliability} confidence</span>
+          </div>
+          <div className="ol-bar"><i className={leanCls(ol.lean)} style={{ width: `${ol.probability}%` }} /></div>
+          <div className="ol-meta">Consensus <b>{ol.consensus}</b> · Previous <b>{ol.previous}</b>{ol.magnitude !== '—' ? <> · typical move <b>{ol.magnitude}</b></> : null}</div>
+          <p className="ol-rationale">{ol.rationale}</p>
+          <div className="ol-scen">
+            {ol.scenarios.map((s, i) => (
+              <div className="ol-row" key={i}><span className="ol-if">{s.condition}</span><span className="ol-then">{s.reaction}</span></div>
+            ))}
+          </div>
+          {ol.sources.length > 0 && <div className="ol-src">Web sources: {ol.sources.join(' · ')}{ol.aiSource !== 'fallback' ? ` — read by ${ol.aiSource}` : ''}</div>}
+          <div className="lvl-note">
+            The print itself is unknowable until release — the % is confidence in the <b>lean</b>, not a guarantee.
+            The scenario map is the tradeable part. Stand aside through the spike.
+          </div>
+        </section>
+      )}
+
       {/* LIVE MARKET PULSE */}
       {(narrative?.live || snap.headlines.length > 0) && (
         <section className="card" style={{ marginTop: 16 }}>
@@ -304,7 +346,14 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
       )}
 
       <footer className="foot">
-        <div className="srcs">Sources: MT5 (Vantage XAUUSD.sc) · FRED · CoinGecko · Yahoo · ForexFactory · gold-api.com</div>
+        <div className="fresh">
+          <span className={mt5Stale ? 'fresh-bad' : 'fresh-ok'}>MT5 feed {fmtAge(f.mt5AgeMs)}</span><span className="dot">•</span>
+          <span>Macro {fmtAge(f.macroAgeMs)}</span><span className="dot">•</span>
+          <span>AI read {fmtAge(f.narrativeAgeMs)}</span><span className="dot">•</span>
+          <span>Calendar {f.newsSource}</span><span className="dot">•</span>
+          <span>Verdict {ageSecs != null ? `${ageSecs}s` : '—'}</span>
+        </div>
+        <div className="srcs">Sources: MT5 (Vantage XAUUSD.sc) · FRED · CoinGecko · Yahoo · ForexFactory · Google News · gold-api.com</div>
         <div>Macro coverage {Math.round(r.coverage * 100)}%<span className="dot">•</span>compute {snap.computeMs}ms{narrative?.source && narrative.source !== 'fallback' ? <><span className="dot">•</span>AI {narrative.source}</> : null}</div>
         <div style={{ marginTop: 6, opacity: .7 }}>Analytical tool for research — not financial advice. Markets carry risk.</div>
       </footer>
