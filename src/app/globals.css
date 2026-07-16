@@ -274,6 +274,22 @@ a:hover { color: var(--gold); }
 .fresh-ok { color: var(--bull); font-weight: 700; }
 .fresh-bad { color: var(--neutral); font-weight: 700; }
 
+/* ── M15 chart ── */
+.chart-wrap { width: 100%; }
+.gchart { width: 100%; height: 340px; display: block; }
+.ch-grid { stroke: var(--border-soft); stroke-width: 1; opacity: .5; }
+.ch-axis { fill: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.ch-lvl { font-size: 9.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ch-price { stroke: var(--gold-bright); stroke-width: 1.2; stroke-dasharray: 4 3; }
+.ch-price-tag { fill: #0a0e1a; font-size: 10px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ch-legend { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 11px; color: var(--text-muted); }
+.ch-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ch-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.k-res { background: var(--bear); } .k-sup { background: var(--bull); }
+.k-px { background: var(--gold-bright); }
+.ch-note { color: var(--text-muted); opacity: .75; }
+@media (max-width: 640px) { .gchart { height: 260px; } }
+
 /* ── key levels (S/R) ── */
 .lvl-warn { margin-bottom: 12px; padding: 10px 12px; border-radius: 9px; background: rgba(255,92,92,.12); border: 1px solid rgba(255,92,92,.45); color: var(--bear); font-size: 13px; font-weight: 600; line-height: 1.5; }
 .lvl { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border-soft); }

@@ -42,6 +42,7 @@ export interface Snapshot {
   narrativeAt: number | null;
   freshness: { mt5AgeMs: number | null; macroAgeMs: number | null; narrativeAgeMs: number | null; newsSource: string };
   spark: number[];
+  chart: { t: number; o: number; h: number; l: number; c: number }[];  // M15 OHLC for the chart
   at: number;
   computeMs: number;
 }
@@ -151,7 +152,10 @@ export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
   }
   if (levels.warning) verdict.cautions.push(levels.warning);
 
-  const spark = (candles['15m']?.length ? candles['15m'] : candles['1h'] || []).slice(-96).map((c) => c.c);
+  const m15 = candles['15m']?.length ? candles['15m'] : candles['1h'] || [];
+  const spark = m15.slice(-96).map((c) => c.c);
+  // OHLC for the M15 chart (volume dropped — the snapshot is cached as JSON in Supabase).
+  const chart = m15.slice(-90).map((c) => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c }));
   const at = Date.now();
 
   const snapshot: Snapshot = {
@@ -165,7 +169,7 @@ export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
       narrativeAgeMs: narrativeAt ? at - narrativeAt : null,
       newsSource: news.source,
     },
-    spark, at, computeMs: at - t0,
+    spark, chart, at, computeMs: at - t0,
   };
 
   await safe(persist(snapshot), undefined);

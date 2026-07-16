@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { Snapshot } from '@/lib/engine/analyze';
 import type { Level } from '@/lib/engine/levels';
 import PriceTicker from './PriceTicker';
+import GoldChart from './GoldChart';
 
 const dirClass = (d: string) => d === 'Bullish' ? 'bull-t' : d === 'Bearish' ? 'bear-t' : d === 'Neutral' ? 'neutral-t' : 'unknown-t';
 const dirColor = (d: string) => d === 'Bullish' ? 'var(--bull)' : d === 'Bearish' ? 'var(--bear)' : d === 'Neutral' ? 'var(--neutral)' : 'var(--text-muted)';
@@ -172,6 +173,12 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
           <div><span className="k">{holdLabel}</span><span className="v mono">{sc.flipLevel != null ? sc.flipLevel.toFixed(2) : '—'}</span></div>
           <div><span className="k">Next event</span><span className="v">{sc.minsToEvent != null ? `${sc.minsToEvent}m` : 'clear'}</span></div>
         </div>
+      </section>
+
+      {/* CHART — M15 with the S/R structure drawn on it */}
+      <section className="card" style={{ marginTop: 16 }}>
+        <h2>XAUUSD · 15m <span className="chip">M15 · MT5 broker candles</span></h2>
+        <GoldChart bars={snap.chart ?? []} levels={(lv.levels ?? []) as Level[]} price={v.spot?.price ?? null} />
       </section>
 
       {/* KEY LEVELS — structure: where directional edge dies */}

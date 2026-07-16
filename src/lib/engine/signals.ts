@@ -60,9 +60,10 @@ export async function readSignals(sinceMs = 0, limit = 50): Promise<TradeSignal[
   } catch { return []; }
 }
 
-export async function emitSignal(
+/** Pure: build the signal (entry/TP/SL) without touching the DB. */
+export function buildSignal(
   scalp: ScalpSignal, bid: number | null, ask: number | null, price: number, levels: LevelsResult | null,
-): Promise<TradeSignal | null> {
+): TradeSignal | null {
   const long = scalp.state === 'TAKE_LONG';
   const entry = (long ? ask : bid) ?? price;   // fill side: pay the spread
   if (!entry || !Number.isFinite(entry) || entry <= 0) return null;
@@ -88,7 +89,14 @@ export async function emitSignal(
       roomPoints: scalp.roomPoints,
     },
   };
+  return sig;
+}
 
+export async function emitSignal(
+  scalp: ScalpSignal, bid: number | null, ask: number | null, price: number, levels: LevelsResult | null,
+): Promise<TradeSignal | null> {
+  const sig = buildSignal(scalp, bid, ask, price, levels);
+  if (!sig) return null;
   try {
     const sb = getSupabase();
     const { data } = await sb.from('ma_cache').select('payload').eq('key', KEY).maybeSingle();
@@ -101,3 +109,47 @@ export async function emitSignal(
   } catch { return null; }
   return sig;
 }
+
+// ── self-check (npx tsx src/lib/engine/signals.ts) ───────────────────────────
+export function demo(): void {
+  const assert = (c: boolean, m: string) => { if (!c) throw new Error('FAIL: ' + m); };
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  const sc = (state: string, confidence: number): any => ({
+    state, confidence, reason: 'x', m1: 'up', m5: 'up', higherBias: 'up',
+    spreadPoints: 28, flipLevel: 4000, roomPoints: 300,
+  });
+
+  // Gate: only TAKE_* above 75.
+  assert(!qualifies(sc('WAIT', 99)), 'WAIT never qualifies');
+  assert(!qualifies(sc('TAKE_LONG', 75)), '75 is not > 75');
+  assert(qualifies(sc('TAKE_LONG', 76)), '76 qualifies');
+
+  // Dedupe: fire on entry to the episode, stay silent while it persists.
+  assert(shouldEmit(sc('TAKE_LONG', 80), sc('WAIT', 0)), 'WAIT→TAKE_LONG should emit');
+  assert(!shouldEmit(sc('TAKE_LONG', 80), sc('TAKE_LONG', 80)), 'persisting episode must NOT re-emit');
+  assert(shouldEmit(sc('TAKE_SHORT', 80), sc('TAKE_LONG', 80)), 'flip should emit');
+  assert(shouldEmit(sc('TAKE_LONG', 80), sc('TAKE_LONG', 70)), 'confidence crossing 75 should emit');
+  assert(!shouldEmit(sc('TAKE_LONG', 70), sc('WAIT', 0)), 'below the bar must not emit');
+
+  // Exit math: LONG fills at ASK, TP +$2.00 (200pt), SL -$1.00 (100pt).
+  const L = buildSignal(sc('TAKE_LONG', 80), 4020.00, 4020.28, 4020.14, null)!;
+  assert(near(L.entry, 4020.28), `long enters at ask, got ${L.entry}`);
+  assert(near(L.tp, 4022.28), `long TP = entry+2.00, got ${L.tp}`);
+  assert(near(L.sl, 4019.28), `long SL = entry-1.00, got ${L.sl}`);
+  assert(L.direction === 'LONG' && L.tpPoints === 200 && L.slPoints === 100, 'long fields');
+
+  // SHORT fills at BID, TP -$2.00, SL +$1.00.
+  const S = buildSignal(sc('TAKE_SHORT', 80), 4020.00, 4020.28, 4020.14, null)!;
+  assert(near(S.entry, 4020.00), `short enters at bid, got ${S.entry}`);
+  assert(near(S.tp, 4018.00), `short TP = entry-2.00, got ${S.tp}`);
+  assert(near(S.sl, 4021.00), `short SL = entry+1.00, got ${S.sl}`);
+
+  // R:R must be 2:1 both ways.
+  assert(near(Math.abs(L.tp - L.entry) / Math.abs(L.entry - L.sl), 2), 'long R:R = 2');
+  assert(near(Math.abs(S.entry - S.tp) / Math.abs(S.sl - S.entry), 2), 'short R:R = 2');
+
+  console.log('signals.ts demo OK —',
+    `LONG entry=${L.entry} tp=${L.tp} sl=${L.sl} | SHORT entry=${S.entry} tp=${S.tp} sl=${S.sl} | R:R 2:1, dedupe per episode`);
+}
+
+if (typeof require !== 'undefined' && require.main === module) demo();
