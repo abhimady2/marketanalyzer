@@ -89,9 +89,12 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
   return (
     <main className="container">
       <div className="topbar">
-        <div className="brand">
-          <span className="kicker">XAU · USD · GOLD</span>
-          <h1>Market <b>Analyzer</b></h1>
+        <div className="brand" style={{ flexDirection: 'row', alignItems: 'center', gap: '16px' }}>
+          <img src="/logo.png" alt="Market Analyzer Logo" style={{ width: '56px', height: '56px', borderRadius: '14px', objectFit: 'cover', boxShadow: '0 4px 12px rgba(0,0,0,0.4)' }} />
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span className="kicker">XAU · USD · GOLD</span>
+            <h1>Market <b>Analyzer</b></h1>
+          </div>
         </div>
         <div className="topright">
           <div className="price-wrap">
