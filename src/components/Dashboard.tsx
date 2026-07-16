@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import type { Snapshot } from '@/lib/engine/analyze';
+import type { Level } from '@/lib/engine/levels';
 import PriceTicker from './PriceTicker';
 
 const dirClass = (d: string) => d === 'Bullish' ? 'bull-t' : d === 'Bearish' ? 'bear-t' : d === 'Neutral' ? 'neutral-t' : 'unknown-t';
@@ -59,6 +60,30 @@ function Gauge({ value, color }: { value: number; color: string }) {
   );
 }
 
+function LevelRow({ l, at }: { l: Level; at: boolean }) {
+  return (
+    <div className={`lvl lvl-${l.kind}${at ? ' lvl-at' : ''}`}>
+      <span className="lvl-tag">{l.kind === 'resistance' ? 'R' : 'S'}</span>
+      <div className="lvl-body">
+        <div className="lvl-top">
+          <span className="lvl-price mono">{l.price.toFixed(2)}</span>
+          <span className="lvl-dist mono">{l.distancePoints > 0 ? '+' : ''}{l.distancePoints}pt</span>
+          {l.isRound && <span className="lvl-chip">round</span>}
+          <span className={`lvl-chip rel-${l.reliability}`}>{l.reliability} conf</span>
+          <span className="lvl-chip">str {l.strength}</span>
+        </div>
+        <div className="lvl-bars">
+          <span className="lvl-holdbar" aria-hidden><i style={{ width: `${l.holdPct}%` }} /></span>
+          <span className="lvl-nums">
+            hold <b className="bull-t">{l.holdPct}%</b> · break <b className="bear-t">{l.breakPct}%</b>
+            {` · ${l.sample} test${l.sample === 1 ? '' : 's'} (${l.rejections}R/${l.breaks}B) · ${l.timeframes.join('/')}`}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard({ initial }: { initial: Snapshot }) {
   const [snap, setSnap] = useState<Snapshot>(initial);
   const [now, setNow] = useState<number | null>(null);
@@ -82,6 +107,9 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
   useEffect(() => { setFlash(true); const id = setTimeout(() => setFlash(false), 800); return () => clearTimeout(id); }, [snap.at]);
 
   const { verdict: v, regime: r, technical: t, news: n, narrative, scalp: sc } = snap;
+  const lv = snap.levels ?? { levels: [], atLevel: null, warning: null, roomLongPoints: null, roomShortPoints: null, available: false } as any;
+  const resList: Level[] = (lv.levels ?? []).filter((l: Level) => l.kind === 'resistance').sort((a: Level, b: Level) => b.price - a.price);
+  const supList: Level[] = (lv.levels ?? []).filter((l: Level) => l.kind === 'support').sort((a: Level, b: Level) => b.price - a.price);
   const ageSecs = now != null ? Math.max(0, Math.round((now - snap.at) / 1000)) : null;
   const markerPos = ((Math.max(-1, Math.min(1, v.bias)) + 1) / 2) * 100;
   const holdLabel = sc.state === 'TAKE_LONG' ? 'Hold above' : sc.state === 'TAKE_SHORT' ? 'Hold below' : 'Flip level';
@@ -126,10 +154,35 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
           <div><span className="k">M5</span><span className={`v ${arrowCls(sc.m5)}`}>{arrow(sc.m5)} {sc.m5}</span></div>
           <div><span className="k">Higher-TF tide</span><span className={`v ${arrowCls(sc.higherBias)}`}>{arrow(sc.higherBias)} {sc.higherBias}</span></div>
           <div><span className="k">Spread</span><span className="v">{sc.spreadPoints != null ? `${sc.spreadPoints} pt` : '—'}</span></div>
+          <div><span className="k">Room to wall</span><span className="v">{sc.roomPoints != null ? `${sc.roomPoints} pt` : '—'}{sc.wall ? ` → ${sc.wall.price.toFixed(2)}` : ''}</span></div>
           <div><span className="k">{holdLabel}</span><span className="v mono">{sc.flipLevel != null ? sc.flipLevel.toFixed(2) : '—'}</span></div>
           <div><span className="k">Next event</span><span className="v">{sc.minsToEvent != null ? `${sc.minsToEvent}m` : 'clear'}</span></div>
         </div>
       </section>
+
+      {/* KEY LEVELS — structure: where directional edge dies */}
+      {lv.available && (
+        <section className="card levels" style={{ marginTop: 16 }}>
+          <h2>Key Levels · Support &amp; Resistance
+            {lv.atLevel && <span className="chip warn">⚠ At {lv.atLevel.kind} — no directional trades</span>}
+          </h2>
+          {lv.warning && <div className="lvl-warn">{lv.warning}</div>}
+
+          {resList.map((l, i) => <LevelRow key={`r${i}`} l={l} at={lv.atLevel?.price === l.price} />)}
+          <div className="lvl-price-line">
+            <span className="lvl-now mono">PRICE {(v.spot?.price ?? 0).toFixed(2)}</span>
+            <span className="lvl-room">
+              {lv.roomLongPoints != null ? `${lv.roomLongPoints}pt to R` : '—'} · {lv.roomShortPoints != null ? `${lv.roomShortPoints}pt to S` : '—'}
+            </span>
+          </div>
+          {supList.map((l, i) => <LevelRow key={`s${i}`} l={l} at={lv.atLevel?.price === l.price} />)}
+
+          <div className="lvl-note">
+            Hold/break odds are empirical base rates from the level&apos;s own test history (Laplace-smoothed),
+            nudged by touch-wear, approach momentum and trend. Low sample = treat as a lean, not a forecast.
+          </div>
+        </section>
+      )}
 
       {/* VERDICT HERO */}
       <section className={`card hero${flash ? ' flash' : ''}`} style={{ marginTop: 16 }}>

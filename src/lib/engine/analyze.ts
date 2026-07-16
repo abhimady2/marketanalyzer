@@ -17,13 +17,15 @@ import type { Candle, Timeframe } from '@/lib/data/candles';
 import { computeRegime, type RegimeInputs, type RegimeResult } from './regime';
 import { computeTechnical, type TechnicalResult } from './technical';
 import { fuse, type Verdict } from './fusion';
-import { computeScalp, type ScalpSignal } from './scalp';
+import { computeScalp, microContext, type ScalpSignal } from './scalp';
+import { computeLevels, type LevelsResult } from './levels';
 import { generateNarrative, type Narrative } from './narrative';
 import { getSupabase } from '@/lib/supabase';
 
 export interface Snapshot {
   verdict: Verdict;
   scalp: ScalpSignal;
+  levels: LevelsResult;
   regime: RegimeResult;
   technical: TechnicalResult;
   news: { events: any[]; upcomingHighUSD: any[]; eventRiskSoon: boolean; source: string };
@@ -87,12 +89,22 @@ export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
   const technical = computeTechnical(candles);
   const verdict = fuse(regime, technical, news, spot);
 
+  // Structure (S/R zones) → then the fast scalp signal, which uses it as a guard.
+  const m1c = mt5?.candles?.['1m'] ?? [], m5c = mt5?.candles?.['5m'] ?? [];
+  const livePrice = spot?.price ?? candles['15m']?.[candles['15m'].length - 1]?.c ?? 0;
+  const mctx = microContext(m1c, m5c, technical, verdict.goldMacroBias);
+  const levels = computeLevels({
+    m15: candles['15m'] ?? [], h1: candles['1h'] ?? [], h4: candles['4h'] ?? [], d1: candles['1d'] ?? [],
+    price: livePrice, microDir: mctx.microDir, higherBias: mctx.higherBias,
+  });
+
   // Fast scalp signal from the MT5 M1/M5 feed (the $1 / 100-point trigger).
   const scalp = computeScalp({
-    m1: mt5?.candles?.['1m'] ?? [], m5: mt5?.candles?.['5m'] ?? [],
+    m1: m1c, m5: m5c,
     technical, goldMacroBias: verdict.goldMacroBias,
     bid: mt5?.price?.bid ?? null, ask: mt5?.price?.ask ?? null,
-    upcomingHighUSD: news.upcomingHighUSD, prevState: prev?.scalp?.state ?? null, now: Date.now(),
+    upcomingHighUSD: news.upcomingHighUSD, levels,
+    prevState: prev?.scalp?.state ?? null, now: Date.now(),
   });
 
   let narrative: Narrative | null = withNarrative
@@ -107,7 +119,7 @@ export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
   const spark = (candles['15m']?.length ? candles['15m'] : candles['1h'] || []).slice(-96).map((c) => c.c);
 
   const snapshot: Snapshot = {
-    verdict, scalp, regime, technical,
+    verdict, scalp, levels, regime, technical,
     news: { events: news.events.slice(0, 12), upcomingHighUSD: news.upcomingHighUSD.slice(0, 6), eventRiskSoon: news.eventRiskSoon, source: news.source },
     headlines: headlines.slice(0, 10),
     narrative, spark, at: Date.now(), computeMs: Date.now() - t0,
