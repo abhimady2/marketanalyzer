@@ -12,13 +12,16 @@
 // Stored as a rolling list in ma_cache (no DDL needed); consumers poll /api/signals.
 
 import { getSupabase } from '@/lib/supabase';
-import type { ScalpSignal } from './scalp';
+import { DISPATCH_TP_POINTS, type ScalpSignal } from './scalp';
 import type { LevelsResult } from './levels';
 
 const KEY = 'signals:recent';
 const MAX_KEEP = 50;
 export const MIN_CONFIDENCE = 75;
-export const TP_POINTS = 200;   // $2.00
+// Imported, NOT redeclared: this used to be a local 200 while scalp.ts screened for only
+// 100pt of clear air, so setups with a wall 100-199pt away were dispatched into a target
+// they could not reach. One constant now feeds both the filter and the trade.
+export const TP_POINTS = DISPATCH_TP_POINTS;   // $2.00
 export const SL_POINTS = 100;   // $1.00
 const PT = 0.01;                // 1 point = $0.01 on XAUUSD
 

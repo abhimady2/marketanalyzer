@@ -34,9 +34,18 @@ export interface ScalpSignal {
   available: boolean;
 }
 
-const TP_POINTS = 100;          // $1.00 on XAUUSD (0.01 = 1 point)
+// The target the auto-dispatcher actually trades. signals.ts imports THIS rather than
+// declaring its own, because it previously declared 200 while the room filter below still
+// screened for 100 — so setups with 100-199pt of room were dispatched into a wall they
+// could never clear before TP. One constant, one target, no drift.
+export const DISPATCH_TP_POINTS = 200;   // $2.00 on XAUUSD (0.01 = 1 point)
+const TP_POINTS = 100;          // $1.00 — the MANUAL scalp target shown on the console
 const EVENT_BLOCK_MIN = 15;     // Balanced: stand aside within 15 min of a high-impact event
-const SPREAD_MAX_POINTS = 40;   // >40% of the 100-pt target = too costly
+const SPREAD_MAX_POINTS = 40;   // >20% of the 200-pt target = too costly
+// A micro-trend has to actually BE a trend: the EMA9/21 spread must be at least this
+// fraction of ATR. Without it a flat M1/M5 (spread ~5% of ATR = noise) still cleared the
+// >75 confidence gate whenever the H1 tide bonus applied, dispatching coin-flips.
+const MIN_ALIGN_STRENGTH = 0.15;
 
 function atr(c: Candle[], p = 14): number | null {
   if (c.length < p + 1) return null;
@@ -127,19 +136,24 @@ export function computeScalp(a: ScalpArgs): ScalpSignal {
   let roomPoints: number | null = null;
   let wall: ScalpSignal['wall'] = null;
 
+  const alignStrength = align ? (m1.strength + m5.strength) / 2 : 0;
+  const weakAlign = align && alignStrength < MIN_ALIGN_STRENGTH;
+
   let state: ScalpState = 'WAIT'; let reason = '';
   if (eventSoon) reason = `${nextEvent} in ${minsToEvent}m — stand aside for the spike.`;
   else if (atLevel) reason = `Price is at ${atLevel.kind} ${atLevel.price.toFixed(2)} (tested ${atLevel.sample}×, ~${atLevel.holdPct}% hold) — it either rejects or breaks. No directional edge here; wait for the reaction.`;
   else if (!align) reason = m1.dir === m5.dir ? 'No micro-trend (M1/M5 flat) — wait.' : 'M1 and M5 disagree — chop, wait for alignment.';
+  else if (weakAlign) reason = `M1/M5 both ${microDir} but barely — EMA9/21 spread is only ${Math.round(alignStrength * 100)}% of ATR (need ${Math.round(MIN_ALIGN_STRENGTH * 100)}%). That's drift, not a trend.`;
   else if (opposed) reason = `M1/M5 ${microDir} but H1 strongly ${higherBias === 'up' ? 'bullish' : 'bearish'} — don't scalp against the higher trend.`;
-  else if (spreadWide) reason = `Spread ${spreadPoints}pt is wide vs the ${TP_POINTS}-pt target — wait for it to tighten.`;
+  else if (spreadWide) reason = `Spread ${spreadPoints}pt is wide vs the ${DISPATCH_TP_POINTS}-pt target — wait for it to tighten.`;
   else {
     const dir = m1.dir > 0 ? 1 : -1;
     const w = (dir > 0 ? a.levels?.nearestResistance : a.levels?.nearestSupport) ?? null;
     roomPoints = (dir > 0 ? a.levels?.roomLongPoints : a.levels?.roomShortPoints) ?? null;
     if (w) wall = { price: w.price, kind: w.kind, holdPct: w.holdPct };
-    if (roomPoints != null && w && roomPoints < TP_POINTS) {
-      reason = `Only ${roomPoints}pt to ${w.kind} ${w.price.toFixed(2)} (~${w.holdPct}% hold) — not enough room for a ${TP_POINTS}pt target.`;
+    // Room must clear the target we actually TRADE (200pt), not the manual 100pt scalp.
+    if (roomPoints != null && w && roomPoints < DISPATCH_TP_POINTS) {
+      reason = `Only ${roomPoints}pt to ${w.kind} ${w.price.toFixed(2)} (~${w.holdPct}% hold) — not enough room for a ${DISPATCH_TP_POINTS}pt target.`;
     } else {
       state = dir > 0 ? 'TAKE_LONG' : 'TAKE_SHORT';
       const withTide = strongHigher && Math.sign(h1!.score) === m1.dir;
@@ -155,7 +169,6 @@ export function computeScalp(a: ScalpArgs): ScalpSignal {
 
   const tpRealistic = state !== 'WAIT';
   // Confidence: micro alignment strength, boosted when the higher tide agrees, zeroed on WAIT.
-  const alignStrength = align ? (m1.strength + m5.strength) / 2 : 0;
   const tideBonus = state !== 'WAIT' && strongHigher && Math.sign(h1!.score) === m1.dir ? 0.2 : 0;
   const confidence = state === 'WAIT' ? 0 : Math.round(Math.min(100, (0.5 + Math.min(0.3, alignStrength) + tideBonus) * 100));
 
@@ -170,8 +183,8 @@ export function computeScalp(a: ScalpArgs): ScalpSignal {
 // ── self-check (npx tsx src/lib/engine/scalp.ts) ─────────────────────────────
 export function demo(): void {
   const assert = (c: boolean, m: string) => { if (!c) throw new Error('FAIL: ' + m); };
-  const ramp = (n: number, dir: number, start = 4000): Candle[] =>
-    Array.from({ length: n }, (_, i) => { const b = start + dir * i * 0.5; return { t: i, o: b, h: b + 0.3, l: b - 0.3, c: b + dir * 0.2, v: 10 }; });
+  const ramp = (n: number, dir: number, start = 4000, slope = 0.5): Candle[] =>
+    Array.from({ length: n }, (_, i) => { const b = start + dir * i * slope; return { t: i, o: b, h: b + 0.3, l: b - 0.3, c: b + dir * 0.2, v: 10 }; });
   const tech = (h1score: number, adx: number): TechnicalResult => ({
     bias: h1score, label: 'Neutral', confidence: 50, available: true,
     timeframes: [{ tf: '1h', score: h1score, label: h1score > 0 ? 'Bullish' : 'Bearish', strength: adx, available: true, signals: [] }] as any,
@@ -227,8 +240,21 @@ export function demo(): void {
   const roomy = computeScalp({ ...base, m1: ramp(40, 1), m5: ramp(40, 1), levels: lvl({ nearestResistance: zone(4030, 'resistance'), roomLongPoints: 300 }) });
   assert(roomy.state === 'TAKE_LONG' && roomy.roomPoints === 300, `roomy should take long, got ${roomy.state}`);
 
+  // REGRESSION: 150pt of room used to pass (>= the old 100pt screen) and was then traded
+  // with a 200pt target — a wall inside the TP. Must WAIT now.
+  const wall150 = computeScalp({ ...base, m1: ramp(40, 1), m5: ramp(40, 1), levels: lvl({ nearestResistance: zone(4015, 'resistance'), roomLongPoints: 150 }) });
+  assert(wall150.state === 'WAIT', `150pt room < ${DISPATCH_TP_POINTS}pt target must WAIT, got ${wall150.state}`);
+
+  // REGRESSION: an aligned-but-flat micro-trend (EMA9/21 spread ~10% of ATR) used to clear
+  // the >75 gate on the H1 tide bonus alone. That is noise, not a trend — must WAIT.
+  const drift = computeScalp({ ...base, technical: tech(0.6, 30), goldMacroBias: 1, m1: ramp(60, 1, 4000, 0.01), m5: ramp(60, 1, 4000, 0.01) });
+  assert(drift.state === 'WAIT' && /drift, not a trend/.test(drift.reason), `flat drift must WAIT, got ${drift.state} (${drift.reason})`);
+  // ...while a genuinely strong trend with the tide behind it still fires, and scores high.
+  assert(up.confidence > 75, `real trend must clear the dispatch gate, got ${up.confidence}`);
+
   console.log('scalp.ts demo OK —', `up=${up.state}(${up.confidence}), dn=${dn.state}, chop=${chop.state}, opp=${opp.state}, ev=${ev.state},`,
-    `flip=${flip.flipped}, atLevel=${onLvl.state}, tightRoom=${tight.state}, roomy=${roomy.state}/${roomy.roomPoints}pt`);
+    `flip=${flip.flipped}, atLevel=${onLvl.state}, tightRoom=${tight.state}, roomy=${roomy.state}/${roomy.roomPoints}pt,`,
+    `wall150=${wall150.state}, drift=${drift.state}`);
 }
 
 if (typeof require !== 'undefined' && require.main === module) demo();
