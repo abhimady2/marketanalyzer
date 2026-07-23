@@ -13,6 +13,7 @@
 
 import { getSupabase } from '@/lib/supabase';
 import { DISPATCH_TP_POINTS, type ScalpSignal } from './scalp';
+import type { ReversalSignal } from './reversal';
 import type { LevelsResult } from './levels';
 
 const KEY = 'signals:recent';
@@ -95,11 +96,9 @@ export function buildSignal(
   return sig;
 }
 
-export async function emitSignal(
-  scalp: ScalpSignal, bid: number | null, ask: number | null, price: number, levels: LevelsResult | null,
-): Promise<TradeSignal | null> {
-  const sig = buildSignal(scalp, bid, ask, price, levels);
-  if (!sig) return null;
+// Append a built signal to the rolling ma_cache feed the paper-trader polls. Shared by the
+// (legacy, manual-console) scalp path and the reversal auto-dispatch.
+async function pushSignal(sig: TradeSignal): Promise<TradeSignal | null> {
   try {
     const sb = getSupabase();
     const { data } = await sb.from('ma_cache').select('payload').eq('key', KEY).maybeSingle();
@@ -111,6 +110,59 @@ export async function emitSignal(
     );
   } catch { return null; }
   return sig;
+}
+
+export async function emitSignal(
+  scalp: ScalpSignal, bid: number | null, ask: number | null, price: number, levels: LevelsResult | null,
+): Promise<TradeSignal | null> {
+  const sig = buildSignal(scalp, bid, ask, price, levels);
+  return sig ? pushSignal(sig) : null;
+}
+
+// ── Reversal Entry Zones dispatch (the live auto-trade signal) ────────────────
+// Fixed exits from the backtest that validated the engine: 3×ATR(5,H1) stop, 2R target.
+export const REV_SL_ATR = 3.0;
+export const REV_TP_RR = 2.0;
+
+/** Build a TradeSignal from a fresh confirmed reversal. Entry pays the spread honestly. */
+export function buildReversal(
+  rev: ReversalSignal, bid: number | null, ask: number | null, price: number, levels: LevelsResult | null,
+): TradeSignal | null {
+  if (!rev.dir || !(rev.atr > 0)) return null;
+  const long = rev.dir === 'LONG';
+  const entry = (long ? ask : bid) ?? price;   // fill side: ask for long, bid for short
+  if (!entry || !Number.isFinite(entry) || entry <= 0) return null;
+
+  const slD = REV_SL_ATR * rev.atr;            // 3×ATR
+  const tpD = slD * REV_TP_RR;                 // 2R
+  return {
+    id: `rev-${long ? 'L' : 'S'}-${Date.now()}`,
+    at: Date.now(),
+    symbol: 'XAUUSD',
+    direction: long ? 'LONG' : 'SHORT',
+    entry,
+    tp: long ? entry + tpD : entry - tpD,
+    sl: long ? entry - slD : entry + slD,
+    tpPoints: Math.round(tpD / PT), slPoints: Math.round(slD / PT),
+    confidence: 70,
+    reason: `Reversal Zone ${rev.dir} — 2.8×ATR swing confirmed off ${rev.pivotPrice?.toFixed(2)}; `
+      + `SL ${REV_SL_ATR}×ATR, TP ${REV_TP_RR}R.`,
+    spreadPoints: bid != null && ask != null ? Math.round((ask - bid) / PT) : null,
+    context: {
+      m1: 'rev', m5: 'rev', higherBias: rev.dir.toLowerCase(),
+      flipLevel: rev.pivotPrice,
+      nearestResistance: levels?.nearestResistance?.price ?? null,
+      nearestSupport: levels?.nearestSupport?.price ?? null,
+      roomPoints: null,
+    },
+  };
+}
+
+export async function emitReversal(
+  rev: ReversalSignal, bid: number | null, ask: number | null, price: number, levels: LevelsResult | null,
+): Promise<TradeSignal | null> {
+  const sig = buildReversal(rev, bid, ask, price, levels);
+  return sig ? pushSignal(sig) : null;
 }
 
 // ── self-check (npx tsx src/lib/engine/signals.ts) ───────────────────────────
@@ -151,8 +203,18 @@ export function demo(): void {
   assert(near(Math.abs(L.tp - L.entry) / Math.abs(L.entry - L.sl), 2), 'long R:R = 2');
   assert(near(Math.abs(S.entry - S.tp) / Math.abs(S.sl - S.entry), 2), 'short R:R = 2');
 
+  // Reversal dispatch (the live auto-trade): SL = 3×ATR, TP = 2R, entry pays the spread.
+  const RL = buildReversal({ dir: 'LONG', pivotPrice: 4000, atr: 5, fresh: true, key: 'LONG@4000.00' }, 4020.0, 4020.3, 4020.15, null)!;
+  assert(near(RL.entry, 4020.3), `rev long enters at ask, got ${RL.entry}`);
+  assert(near(RL.entry - RL.sl, 15), `rev long SL = 3×ATR = 15 below, got ${RL.entry - RL.sl}`);
+  assert(near(Math.abs(RL.tp - RL.entry) / Math.abs(RL.entry - RL.sl), 2), 'rev long R:R = 2');
+  const RS = buildReversal({ dir: 'SHORT', pivotPrice: 4040, atr: 5, fresh: true, key: 'SHORT@4040.00' }, 4020.0, 4020.3, 4020.15, null)!;
+  assert(near(RS.sl - RS.entry, 15) && RS.entry === 4020.0, `rev short SL = 3×ATR above bid, got ${RS.sl - RS.entry}`);
+  assert(near(Math.abs(RS.entry - RS.tp) / Math.abs(RS.sl - RS.entry), 2), 'rev short R:R = 2');
+
   console.log('signals.ts demo OK —',
-    `LONG entry=${L.entry} tp=${L.tp} sl=${L.sl} | SHORT entry=${S.entry} tp=${S.tp} sl=${S.sl} | R:R 2:1, dedupe per episode`);
+    `LONG entry=${L.entry} tp=${L.tp} sl=${L.sl} | SHORT entry=${S.entry} tp=${S.tp} sl=${S.sl} | R:R 2:1;`,
+    `reversal: L slD=${(RL.entry - RL.sl).toFixed(0)} tpD=${(RL.tp - RL.entry).toFixed(0)} (2R)`);
 }
 
 if (typeof require !== 'undefined' && require.main === module) demo();

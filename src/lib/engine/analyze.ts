@@ -25,13 +25,15 @@ import { computeScalp, microContext, type ScalpSignal } from './scalp';
 import { computeLevels, type LevelsResult } from './levels';
 import { generateNarrative, type Narrative } from './narrative';
 import { generateEventOutlook, type EventOutlook } from './outlook';
-import { shouldEmit, emitSignal, type TradeSignal } from './signals';
+import { emitReversal, type TradeSignal } from './signals';
+import { computeReversal } from './reversal';
 import { getSupabase } from '@/lib/supabase';
 
 export interface Snapshot {
   verdict: Verdict;
   scalp: ScalpSignal;
   lastSignal: TradeSignal | null;
+  lastReversalKey?: string | null;   // dedupe: the confirmed pivot the last dispatch fired on
   levels: LevelsResult;
   regime: RegimeResult;
   technical: TechnicalResult;
@@ -120,12 +122,18 @@ export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
     prevState: prev?.scalp?.state ?? null, now: Date.now(),
   });
 
-  // Dispatch a trade signal to the paper-trader the moment the scalp turns actionable
-  // (>75% conviction). Once per episode — never re-fired while the same call persists.
+  // Auto-dispatch to the paper-trader: the H1 Reversal Entry Zones engine. This REPLACES the
+  // M1/M5 scalp dispatch — the scalp measured as a coin flip (win rate ≈ the 33% random
+  // baseline, z=-0.27 over 334 live trades), whereas the reversal signal beats random 100% of
+  // trials, holds out-of-sample, and stays profitable in a down year. The scalp is still
+  // computed above purely for the manual console. Dedupe by confirmed pivot so each reversal
+  // fires exactly once; the fresh-gate blocks re-emitting a stale reversal on cold start.
   let lastSignal: TradeSignal | null = prev?.lastSignal ?? null;
-  if (shouldEmit(scalp, prev?.scalp ?? null)) {
-    const s = await safe(emitSignal(scalp, mt5?.price?.bid ?? null, mt5?.price?.ask ?? null, livePrice, levels), null);
-    if (s) lastSignal = s;
+  let lastReversalKey: string | null = prev?.lastReversalKey ?? null;
+  const reversal = computeReversal(candles['1h'] ?? []);
+  if (reversal.dir && reversal.fresh && reversal.key && reversal.key !== lastReversalKey) {
+    const s = await safe(emitReversal(reversal, mt5?.price?.bid ?? null, mt5?.price?.ask ?? null, livePrice, levels), null);
+    if (s) { lastSignal = s; lastReversalKey = reversal.key; }
   }
 
   // AI layer (narrative + next-event outlook) — raced together, only when needed.
@@ -159,7 +167,7 @@ export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
   const at = Date.now();
 
   const snapshot: Snapshot = {
-    verdict, scalp, lastSignal, levels, regime, technical,
+    verdict, scalp, lastSignal, lastReversalKey, levels, regime, technical,
     news: { events: news.events.slice(0, 12), upcomingHighUSD: news.upcomingHighUSD.slice(0, 6), eventRiskSoon: news.eventRiskSoon, source: news.source },
     headlines: headlines.slice(0, 10),
     narrative, outlook, narrativeAt,
