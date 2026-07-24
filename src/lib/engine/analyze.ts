@@ -88,11 +88,17 @@ async function getRegimeInputs(): Promise<{ inputs: RegimeInputs; ageMs: number 
   return cached ? { inputs: cached, ageMs: cachedAge } : { inputs, ageMs: 0 };
 }
 
-export async function runAnalysis(withNarrative = false): Promise<Snapshot> {
+export async function runAnalysis(withNarrative = false, refreshNarrative = true): Promise<Snapshot> {
   const t0 = Date.now();
   const prev = await getLatestSnapshot();
-  // Self-healing: regenerate AI text/outlook whenever they'd otherwise be stale.
-  const needNarrative = withNarrative || !prev?.narrativeAt || (Date.now() - prev.narrativeAt > NARRATIVE_TTL);
+  // Self-healing: regenerate AI text/outlook whenever they'd otherwise be stale — EXCEPT when
+  // refreshNarrative=false. The gold signal poller hits /api/signals every ~20s and only needs
+  // price + the reversal signal, never the narrative; but the free-model AI call can take 45s+
+  // and was ReadTimeout-ing that poll (STALE_MS forces a recompute on nearly every poll, and
+  // the daily cron is the only other keep-warm). Narrative still refreshes via the dashboard
+  // (/api/verdict, page load) and the daily cron — just not on the signal heartbeat.
+  const needNarrative = withNarrative
+    || (refreshNarrative && (!prev?.narrativeAt || (Date.now() - prev.narrativeAt > NARRATIVE_TTL)));
 
   const [inputsRes, candles, news, spot, freshHeadlines, mt5] = await Promise.all([
     getRegimeInputs(),

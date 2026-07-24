@@ -22,8 +22,10 @@ export async function GET(req: NextRequest) {
   if (secret && provided !== secret) return new Response('Unauthorized', { status: 401 });
 
   // Keep the engine warm so signals fire on schedule regardless of web traffic.
+  // refreshNarrative=false: this heartbeat must stay fast — it only needs price + the reversal
+  // signal, never the AI narrative, whose free-model call was ReadTimeout-ing the gold poller.
   const snap = await getLatestSnapshot();
-  const fresh = snap && Date.now() - snap.at < STALE_MS ? snap : await runAnalysis(false);
+  const fresh = snap && Date.now() - snap.at < STALE_MS ? snap : await runAnalysis(false, false);
 
   const since = Number(url.searchParams.get('since') || 0);
   const signals = await readSignals(Number.isFinite(since) ? since : 0, 50);
