@@ -1,6 +1,6 @@
 import { getLatestSnapshot, runAnalysis } from '@/lib/engine/analyze';
 
-// The dashboard polls this ~15s. Serve the cached snapshot when fresh; otherwise
+// The dashboard polls this ~8s. Serve the cached snapshot when fresh; otherwise
 // recompute SYNCHRONOUSLY (fast — macro inputs are cached 30m and candles/news come
 // from the MT5 feed in Supabase) so every stale poll returns genuinely current data.
 // (Vercel's `after()` background task proved unreliable here, freezing the snapshot.)
@@ -8,9 +8,20 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const STALE_MS = 8 * 1000; // scalp needs freshness; recompute is cheap (MT5 feed from Supabase, macro cached)
+// ponytail: 10s = the MT5 EA's own push interval. Recomputing faster than the feed
+// arrives just re-derives the same answer on Vercel's clock. Paired with s-maxage
+// below, N open tabs collapse to ONE origin invocation per window instead of N.
+const STALE_MS = 10 * 1000;
 const json = (o: unknown, status = 200) =>
-  new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
+  new Response(JSON.stringify(o), {
+    status,
+    headers: {
+      'content-type': 'application/json',
+      // Shared-cache only: the CDN fans one recompute out to every poller, while
+      // `no-store` clients still always reach the edge (never a stale browser copy).
+      'cache-control': 's-maxage=10, stale-while-revalidate=20',
+    },
+  });
 
 export async function GET() {
   const snap = await getLatestSnapshot();

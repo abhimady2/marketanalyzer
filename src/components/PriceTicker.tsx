@@ -8,6 +8,7 @@ export default function PriceTicker({ initial }: { initial: Spot | null }) {
   useEffect(() => {
     let live = true;
     const tick = async () => {
+      if (document.hidden) return;   // ponytail: don't poll a tab nobody is looking at
       try {
         const r = await fetch('/api/price', { cache: 'no-store' });
         const j = await r.json();
@@ -16,7 +17,8 @@ export default function PriceTicker({ initial }: { initial: Spot | null }) {
     };
     tick();
     const id = setInterval(tick, 10000);
-    return () => { live = false; clearInterval(id); };
+    document.addEventListener('visibilitychange', tick);
+    return () => { live = false; clearInterval(id); document.removeEventListener('visibilitychange', tick); };
   }, []);
 
   if (!spot) return <span className="price">—</span>;

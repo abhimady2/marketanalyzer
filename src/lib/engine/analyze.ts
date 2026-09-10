@@ -192,6 +192,9 @@ export async function runAnalysis(withNarrative = false, refreshNarrative = true
 
 async function persist(s: Snapshot): Promise<void> {
   const sb = getSupabase();
+  // ponytail: current snapshot only. The append-only ma_analysis_snapshots insert that used to
+  // follow this was read by nothing, grew ~26 MB/day, and filled the 500 MB free-tier quota —
+  // restricting the whole Supabase project (shared with the CRM) on 2026-08-28. If history is
+  // ever actually needed, use the bounded rolling-list-in-ma_cache pattern from signals.ts.
   await sb.from('ma_cache').upsert({ key: CACHE_KEY, payload: s, updated_at: new Date().toISOString() }, { onConflict: 'key' });
-  await sb.from('ma_analysis_snapshots').insert({ kind: 'verdict', payload: s });
 }

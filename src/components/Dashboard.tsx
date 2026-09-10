@@ -100,6 +100,9 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
   useEffect(() => {
     let alive = true;
     const poll = async () => {
+      // ponytail: a backgrounded tab left open used to poll all night, burning Vercel
+      // CPU for pixels nobody was looking at. visibilitychange re-polls on return.
+      if (document.hidden) return;
       try {
         const r = await fetch('/api/verdict', { cache: 'no-store' });
         const j = await r.json();
@@ -108,7 +111,8 @@ export default function Dashboard({ initial }: { initial: Snapshot }) {
     };
     poll();
     const id = setInterval(poll, 8000);
-    return () => { alive = false; clearInterval(id); };
+    document.addEventListener('visibilitychange', poll);
+    return () => { alive = false; clearInterval(id); document.removeEventListener('visibilitychange', poll); };
   }, []);
 
   useEffect(() => { setNow(Date.now()); const id = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(id); }, []);

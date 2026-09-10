@@ -10,7 +10,11 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const STALE_MS = 8 * 1000;
+// ponytail: 60s, not 8s. The dispatched signal is the H1 reversal, and computeReversal
+// only emits on the current or just-closed HOURLY bar (FRESH_BARS=1) — a ~1-2h window.
+// Recomputing every 8s bought zero signal timeliness and was the single biggest Vercel
+// Fluid-CPU drain: this poller runs 24/7 whether or not anyone has the site open.
+const STALE_MS = 60 * 1000;
 const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
 
