@@ -9,6 +9,8 @@ export async function GET() {
   const spot = await fetchSpot();
   return new Response(JSON.stringify({ spot }), {
     status: spot ? 200 : 503,
-    headers: { 'content-type': 'application/json', 'cache-control': 's-maxage=10, stale-while-revalidate=30' },
+    // Vercel-CDN-Cache-Control, not cache-control — Next overrides the latter on
+    // force-dynamic routes, so this endpoint was never actually CDN-cached. See verdict route.
+    headers: { 'content-type': 'application/json', 'Vercel-CDN-Cache-Control': 'max-age=10, stale-while-revalidate=30' },
   });
 }

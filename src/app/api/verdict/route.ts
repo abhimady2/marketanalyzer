@@ -17,9 +17,12 @@ const json = (o: unknown, status = 200) =>
     status,
     headers: {
       'content-type': 'application/json',
-      // Shared-cache only: the CDN fans one recompute out to every poller, while
-      // `no-store` clients still always reach the edge (never a stale browser copy).
-      'cache-control': 's-maxage=10, stale-while-revalidate=20',
+      // The CDN fans ONE recompute out to every poller. Must be Vercel-CDN-Cache-Control,
+      // NOT cache-control: Next overrides cache-control to `public, max-age=0,
+      // must-revalidate` on every `dynamic = 'force-dynamic'` route handler, which silently
+      // ate the s-maxage that /api/price had been setting (uselessly) for weeks. This header
+      // Next leaves alone, and being CDN-only the browser still never serves a stale copy.
+      'Vercel-CDN-Cache-Control': 'max-age=10, stale-while-revalidate=20',
     },
   });
 
