@@ -14,7 +14,9 @@
 input string InpServerUrl = "https://marketanalyzer-amber.vercel.app/api/ingest"; // Ingest endpoint (whitelist the origin)
 input string InpSecret    = "175f9d04bf47be063e9f946ded2fcff2";                  // Matches server INGEST_SECRET
 input string InpSymbol    = "XAUUSD.sc"; // Vantage gold symbol ("" = use the chart symbol)
-input int    InpTimerSec  = 10;        // Push interval (seconds) — 10s for scalp freshness
+input int    InpTimerSec  = 60;        // Push interval (seconds) — 60s default; was 10s, which
+                                          // alone burned ~2 of Vercel Hobby's 4 Fluid-CPU hours
+                                          // (24/7 VPS pushes). Recompile on the VPS to apply.
 input int    InpCandles   = 200;       // Candles per timeframe to send
 input bool   InpSendM1    = true;      // Push M1 candles (fast scalp signal)
 input bool   InpSendM5    = true;      // Push M5 candles (fast scalp signal)

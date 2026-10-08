@@ -52,7 +52,10 @@ export interface Snapshot {
 const CACHE_KEY = 'verdict:latest';
 const INPUTS_KEY = 'macro:inputs';
 const MACRO_TTL = 20 * 60 * 1000;      // macro sources are daily-cadence; 20m is not stale
-const NARRATIVE_TTL = 10 * 60 * 1000;  // AI text/outlook self-heal past this
+const NARRATIVE_TTL = 6 * 60 * 60 * 1000;  // AI text/outlook self-heal past this.
+// ponytail: was 10min — under an 8s-polled dashboard that regenerated a 45s+ free-model
+// call six times an hour, which alone eats the Hobby tier's 4 Fluid-CPU hours. The prose
+// is for humans; ~4 refreshes a day (plus the daily cron's explicit refresh) is plenty.
 
 async function safe<T>(p: Promise<T>, fallback: T): Promise<T> { try { return await p; } catch { return fallback; } }
 const emptyTF = (): Record<Timeframe, Candle[]> => ({ '1d': [], '4h': [], '1h': [], '15m': [] });

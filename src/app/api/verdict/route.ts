@@ -8,10 +8,11 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// ponytail: 10s = the MT5 EA's own push interval. Recomputing faster than the feed
-// arrives just re-derives the same answer on Vercel's clock. Paired with s-maxage
-// below, N open tabs collapse to ONE origin invocation per window instead of N.
-const STALE_MS = 10 * 1000;
+// ponytail: 60s = a human looking at a dashboard. Regime/technical/levels ride the H1
+// candles, not the tick — a 10s recompute per 8s poll just re-derived the same answer
+// on Vercel's clock. Paired with s-maxage below, N open tabs collapse to ONE origin
+// invocation per window instead of N.
+const STALE_MS = 60 * 1000;
 const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), {
     status,
@@ -22,7 +23,7 @@ const json = (o: unknown, status = 200) =>
       // must-revalidate` on every `dynamic = 'force-dynamic'` route handler, which silently
       // ate the s-maxage that /api/price had been setting (uselessly) for weeks. This header
       // Next leaves alone, and being CDN-only the browser still never serves a stale copy.
-      'Vercel-CDN-Cache-Control': 'max-age=10, stale-while-revalidate=20',
+      'Vercel-CDN-Cache-Control': 'max-age=60, stale-while-revalidate=120',
     },
   });
 
