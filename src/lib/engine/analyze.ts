@@ -25,15 +25,11 @@ import { computeScalp, microContext, type ScalpSignal } from './scalp';
 import { computeLevels, type LevelsResult } from './levels';
 import { generateNarrative, type Narrative } from './narrative';
 import { generateEventOutlook, type EventOutlook } from './outlook';
-import { emitReversal, type TradeSignal } from './signals';
-import { computeReversal } from './reversal';
 import { getSupabase } from '@/lib/supabase';
 
 export interface Snapshot {
   verdict: Verdict;
   scalp: ScalpSignal;
-  lastSignal: TradeSignal | null;
-  lastReversalKey?: string | null;   // dedupe: the confirmed pivot the last dispatch fired on
   levels: LevelsResult;
   regime: RegimeResult;
   technical: TechnicalResult;
@@ -95,11 +91,10 @@ export async function runAnalysis(withNarrative = false, refreshNarrative = true
   const t0 = Date.now();
   const prev = await getLatestSnapshot();
   // Self-healing: regenerate AI text/outlook whenever they'd otherwise be stale — EXCEPT when
-  // refreshNarrative=false. The gold signal poller hits /api/signals every ~20s and only needs
-  // price + the reversal signal, never the narrative; but the free-model AI call can take 45s+
-  // and was ReadTimeout-ing that poll (STALE_MS forces a recompute on nearly every poll, and
-  // the daily cron is the only other keep-warm). Narrative still refreshes via the dashboard
-  // (/api/verdict, page load) and the daily cron — just not on the signal heartbeat.
+  // refreshNarrative=false. The narrative is regenerated whenever it would otherwise be
+  // stale; the free-model AI call can take 45s+, so reads that only need price + data
+  // pass refreshNarrative=false. Narrative still refreshes via the dashboard
+  // (/api/verdict, page load) and the daily cron.
   const needNarrative = withNarrative
     || (refreshNarrative && (!prev?.narrativeAt || (Date.now() - prev.narrativeAt > NARRATIVE_TTL)));
 
@@ -131,19 +126,9 @@ export async function runAnalysis(withNarrative = false, refreshNarrative = true
     prevState: prev?.scalp?.state ?? null, now: Date.now(),
   });
 
-  // Auto-dispatch to the paper-trader: the H1 Reversal Entry Zones engine. This REPLACES the
-  // M1/M5 scalp dispatch — the scalp measured as a coin flip (win rate ≈ the 33% random
-  // baseline, z=-0.27 over 334 live trades), whereas the reversal signal beats random 100% of
-  // trials, holds out-of-sample, and stays profitable in a down year. The scalp is still
-  // computed above purely for the manual console. Dedupe by confirmed pivot so each reversal
-  // fires exactly once; the fresh-gate blocks re-emitting a stale reversal on cold start.
-  let lastSignal: TradeSignal | null = prev?.lastSignal ?? null;
-  let lastReversalKey: string | null = prev?.lastReversalKey ?? null;
-  const reversal = computeReversal(candles['1h'] ?? []);
-  if (reversal.dir && reversal.fresh && reversal.key && reversal.key !== lastReversalKey) {
-    const s = await safe(emitReversal(reversal, mt5?.price?.bid ?? null, mt5?.price?.ask ?? null, livePrice, levels), null);
-    if (s) { lastSignal = s; lastReversalKey = reversal.key; }
-  }
+  // Auto-dispatch to the paper-trader: REMOVED — the Trading Intelligence paper-trader
+  // that polled /api/signals is retired, so the whole reversal-dispatch pipeline
+  // (signals.ts, reversal.ts, /api/signals) is gone with it.
 
   // AI layer (narrative + next-event outlook) — raced together, only when needed.
   let narrative: Narrative | null = null;
@@ -176,7 +161,7 @@ export async function runAnalysis(withNarrative = false, refreshNarrative = true
   const at = Date.now();
 
   const snapshot: Snapshot = {
-    verdict, scalp, lastSignal, lastReversalKey, levels, regime, technical,
+    verdict, scalp, levels, regime, technical,
     news: { events: news.events.slice(0, 12), upcomingHighUSD: news.upcomingHighUSD.slice(0, 6), eventRiskSoon: news.eventRiskSoon, source: news.source },
     headlines: headlines.slice(0, 10),
     narrative, outlook, narrativeAt,
